@@ -13,6 +13,7 @@ from datetime import datetime
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+from report_generator import generate_report
 
 # Configurar página
 st.set_page_config(
@@ -88,6 +89,9 @@ plugins = {
     'lyapunov_stability': st.sidebar.checkbox('Caos (Lyapunov)', value=True),
     'persistent_homology': st.sidebar.checkbox('Topología', value=True),
     'renormalization_group': st.sidebar.checkbox('Criticalidad', value=True)
+    ,
+    'anisotropy': st.sidebar.checkbox('Anisotropía', value=True),
+    'entropy': st.sidebar.checkbox('Entropía', value=True)
 }
 
 active_plugins = [k for k, v in plugins.items() if v]
@@ -270,6 +274,20 @@ def run_analysis(image, active_plugins, mode):
         from plugins.renormalization_group import RenormalizationGroup
         plugin = RenormalizationGroup()
         results['renormalization_group'] = plugin.analyze(image)
+        progress_bar.progress(80)
+
+    # 6. Anisotropía
+    if 'anisotropy' in active_plugins:
+        status_text.text("📐 Calculando anisotropía...")
+        from plugins.anisotropy import calculate_anisotropy
+        results['anisotropy'] = calculate_anisotropy(image)
+        progress_bar.progress(90)
+
+    # 7. Entropía
+    if 'entropy' in active_plugins:
+        status_text.text("🔎 Calculando entropía e información...")
+        from plugins.entropy import calculate_entropy
+        results['entropy'] = calculate_entropy(image)
         progress_bar.progress(100)
     
     status_text.empty()
@@ -314,12 +332,22 @@ def compute_global_score(plugin_results, mode):
     
     return np.clip(score, 0.0, 1.0)
 
-def monte_carlo_validation(score, n_simulations=1000):
-    """Validación Monte Carlo."""
-    np.random.seed(42)
+def monte_carlo_validation(score, n_simulations=10000):
+    """Validación Monte Carlo.
+
+    Devuelve p-value, marcadores de significancia, y estadísticas de la
+    distribución nula (media, std, error estándar y CI 95%).
+    """
+    # No fijar la semilla globalmente aquí para evitar resultados deterministas
     null_dist = np.random.beta(2, 5, n_simulations)
     p_value = np.mean(null_dist >= score)
-    
+
+    null_mean = float(np.mean(null_dist))
+    null_std = float(np.std(null_dist, ddof=1))
+    null_se = float(null_std / np.sqrt(max(1, n_simulations)))
+    ci_lower = float(null_mean - 1.96 * null_se)
+    ci_upper = float(null_mean + 1.96 * null_se)
+
     if p_value < 0.001:
         stars = "***"
     elif p_value < 0.01:
@@ -328,11 +356,16 @@ def monte_carlo_validation(score, n_simulations=1000):
         stars = "*"
     else:
         stars = "ns"
-    
+
     return {
         'p_value': p_value,
         'stars': stars,
-        'is_significant': p_value < 0.05
+        'is_significant': p_value < 0.05,
+        'null_mean': null_mean,
+        'null_std': null_std,
+        'null_se': null_se,
+        'null_ci95': [ci_lower, ci_upper],
+        'n_simulations': n_simulations
     }
 
 # Procesamiento principal
@@ -411,6 +444,22 @@ if uploaded_file is not None:
                     st.success("✅ Anomalía estadísticamente significativa")
                 else:
                     st.info("ℹ️ Dentro de rangos normales")
+                
+                # Generar y mostrar informe automático (Resumen ejecutivo, hallazgos, advertencias, conclusión)
+                try:
+                    results_for_report = {
+                        'timestamp': datetime.now().isoformat(),
+                        'filename': metadata.get('filename'),
+                        'mode': mode,
+                        'global_score': global_score,
+                        'monte_carlo': mc_results,
+                        'plugin_results': plugin_results
+                    }
+                    report_text = generate_report(results_for_report)
+                    with st.expander('📝 Informe automático (Resumen)'):
+                        st.markdown(report_text)
+                except Exception as e:
+                    st.warning(f"No se pudo generar el informe automático: {e}")
             
             # Resultados por plugin
             st.markdown("---")
@@ -511,7 +560,8 @@ if uploaded_file is not None:
                     'mode': mode,
                     'global_score': global_score,
                     'monte_carlo': mc_results,
-                    'plugin_results': plugin_results
+                    'plugin_results': plugin_results,
+                    'report': locals().get('report_text', '')
                 }, indent=2, default=str)
                 
                 st.download_button(

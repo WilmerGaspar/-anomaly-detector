@@ -20,14 +20,16 @@ def _mission_ok(raw, selected):
 def _hint(name):
     low = (name or "").lower()
     if any(s in low for s in ("i2d", "_drz", "_drc")):
-        return "imagen calibrada"
+        return "imagen calibrada — USAR ESTE"
     if "x1d" in low:
-        return "espectro 1D"
+        return "espectro 1D — para libreria MIR"
     if "s3d" in low:
         return "cubo 3D"
     if "uncal" in low or "_raw" in low:
-        return "CRUDO detector — no usar para materiales"
-    if "rate" in low or "_cal" in low:
+        return "CRUDO detector — no materiales"
+    if "rateints" in low or "rateint" in low or "_rate." in low:
+        return "rate detector — no mapa del cielo"
+    if "_cal" in low:
         return "calibrado intermedio"
     return ""
 
@@ -92,7 +94,7 @@ def list_fits_products(obsid, max_mb=None):
             if low.endswith(suf) or suf.replace(".fits", "") in low:
                 rank = i
                 break
-        if "uncal" in low:
+        if any(k in low for k in ("uncal", "rateints", "_rate.")):
             rank = 90
         out.append({
             "filename": name,
@@ -125,5 +127,5 @@ def download_product(uri, filename, max_mb=200.0):
         path = found[-1]
     data = Path(path).read_bytes()
     if len(data) > max_mb * 1024 * 1024:
-        raise RuntimeError("FITS > %.0f MB. Elige uno mas chico (i2d/x1d)." % max_mb)
+        raise RuntimeError("FITS > %.0f MB. Elige i2d/x1d." % max_mb)
     return data

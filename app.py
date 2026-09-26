@@ -1,4 +1,4 @@
-"""CMS-80. Sin cache sobre archivos (evita UnhashableParamError)."""
+"""CMS-80. Sin cache sobre archivos. INICIAR + Fibonacci."""
 from datetime import datetime
 import io
 
@@ -18,7 +18,7 @@ from scoring import cheap_score_from_image, compute_global_score, surrogate_null
 PHOSPHOR = "#33ff66"
 BG = "#020803"
 
-st.set_page_config(page_title="CMS-80 | COSMIC MATERIALS SCOUT", page_icon="■", layout="wide")
+st.set_page_config(page_title="CMS-80 | COSMIC MATERIALS SCOUT", page_icon="\u25a0", layout="wide")
 st.markdown("""
 <style>
 .stApp { background:#020803; color:#b7ffc2; }
@@ -28,7 +28,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.markdown("## CMS-80  COSMIC MATERIALS SCOUT")
-st.caption("MAST Hubble / Webb / Roman  ·  preview + FITS")
+st.caption("MAST Hubble / Webb / Roman  \u00b7  preview + FITS  \u00b7  INICIAR")
 
 st.sidebar.markdown("`CONFIG`")
 source_url = st.sidebar.text_input("URL FITS DIRECTO", value="")
@@ -42,6 +42,7 @@ plugins = {
     "renormalization_group": st.sidebar.checkbox("RG", value=True),
     "lyapunov_stability": st.sidebar.checkbox("ROSENSTEIN", value=True),
     "entropy": st.sidebar.checkbox("SHANNON", value=True),
+    "fibonacci": st.sidebar.checkbox("FIBONACCI / PHI", value=True),
 }
 active_plugins = [k for k, v in plugins.items() if v]
 n_null = st.sidebar.slider("NULOS", 10, 80, 24, 2)
@@ -104,10 +105,13 @@ def run_analysis(image, active):
     if "periodicity" in active:
         from plugins.periodicity import analyze_periodicity
         results["periodicity"] = analyze_periodicity(image)
+    if "fibonacci" in active:
+        from plugins.fibonacci import analyze_fibonacci
+        results["fibonacci"] = analyze_fibonacci(image)
     return results
 
 
-st.markdown("### DATOS  —  Hubble / Webb / Roman")
+st.markdown("### DATOS  \u2014  Hubble / Webb / Roman")
 d1, d2, d3 = st.columns([2, 2, 1])
 with d1:
     target = st.text_input("Objeto o coordenadas", value="NGC 7023")
@@ -164,6 +168,7 @@ if prods:
             st.session_state["field_name"] = prod["filename"]
             st.session_state["field_bytes"] = blob
             st.session_state["field_url"] = prod.get("uri") or ""
+            st.session_state["started"] = False
             st.success(prod["filename"])
         except Exception as exc:
             st.error("MAST.ERR  " + str(exc))
@@ -174,6 +179,7 @@ if up is not None:
     st.session_state["field_name"] = up.name
     st.session_state["field_bytes"] = up.getvalue()
     st.session_state["field_url"] = source_url
+    st.session_state["started"] = False
 
 if source_url.strip().lower().endswith((".fits", ".fit", ".fits.gz")) and st.button("BAJAR URL"):
     import requests
@@ -183,6 +189,7 @@ if source_url.strip().lower().endswith((".fits", ".fit", ".fits.gz")) and st.but
         st.session_state["field_name"] = source_url.split("?")[0].rstrip("/").split("/")[-1]
         st.session_state["field_bytes"] = r.content
         st.session_state["field_url"] = source_url
+        st.session_state["started"] = False
     except Exception as exc:
         st.error(str(exc))
 
@@ -191,8 +198,14 @@ raw = st.session_state.get("field_bytes")
 src = st.session_state.get("field_url") or source_url
 
 if not raw:
-    st.info("Busca un objeto, elige Hubble/Webb/Roman, mira el preview y carga el FITS.")
+    st.info("Busca un objeto, carga el FITS y pulsa INICIAR.")
 else:
+    st.success("ARCHIVO EN BUFFER: %s  (%d KB)" % (name, len(raw) // 1024))
+    if st.button("INICIAR", type="primary", use_container_width=True):
+        st.session_state["started"] = True
+    if not st.session_state.get("started"):
+        st.caption("Pulsa INICIAR para montar el campo.")
+        st.stop()
     image, metadata, error = load_from_bytes(name, raw)
     if error:
         st.error(error)
@@ -218,6 +231,10 @@ else:
                 materials["is_candidate"] = False
             st.write(materials["verdict"])
             st.metric("NOS", "%.2f" % nos["nos"])
+            fib = plugin_results.get("fibonacci") or {}
+            if fib:
+                st.metric("PHI HITS", str(fib.get("n_phi_pairs", 0)))
+                st.caption("ratio=%.3f  err=%.3f  score=%.2f" % (fib.get("best_ratio") or 0, fib.get("phi_error") or 1, fib.get("fibonacci_score") or 0))
             st.write(materials["dominant_label"] + "  |  " + materials["lab_analog"])
             fam = materials["family_scores"]
             figb = px.bar(x=list(fam.keys()), y=list(fam.values()), title="MEZCLA")

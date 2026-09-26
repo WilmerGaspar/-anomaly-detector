@@ -1,4 +1,4 @@
-"""CMS-80. Lista todos los FITS de la observacion."""
+"""CMS-80. Lista FITS; i2d/x1d primero; uncal/rate no son candidatos."""
 from datetime import datetime
 import io
 
@@ -27,7 +27,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.markdown("## CMS-80  COSMIC MATERIALS SCOUT")
-st.caption("MAST Hubble / Webb / Roman  \u00b7  elige el FITS de la lista")
+st.caption("Usa i2d / drz / x1d. uncal y rateints no cuentan como material.")
 
 st.sidebar.markdown("`CONFIG`")
 source_url = st.sidebar.text_input("URL FITS DIRECTO", value="")
@@ -154,15 +154,15 @@ if obs_rows:
 prods = st.session_state.get("mast_prods") or []
 if prods:
     st.caption("%d archivos FITS en esta observacion" % len(prods))
-    filtro = st.radio("Filtro", ["todos", "recomendados (i2d/drz/x1d)", "crudos (uncal)"], horizontal=True)
+    filtro = st.radio("Filtro", ["recomendados (i2d/drz/x1d)", "todos", "crudos (uncal/rate)"], horizontal=True, index=0)
     shown = prods
     if filtro.startswith("recomendados"):
         shown = [p for p in prods if any(k in p["filename"].lower() for k in ("i2d", "drz", "drc", "x1d", "s3d"))]
     elif filtro.startswith("crudos"):
-        shown = [p for p in prods if "uncal" in p["filename"].lower()]
+        shown = [p for p in prods if any(k in p["filename"].lower() for k in ("uncal", "rateints", "_rate"))]
     if not shown:
         shown = prods
-        st.warning("Ese filtro quedo vacio; muestro todos.")
+        st.warning("No hay i2d/x1d en esta fila (suele pasar en NIRSpec). Cambia de observacion o mira TODOS.")
     st.dataframe(
         [{"archivo": p["filename"], "MB": None if p.get("size_mb") is None else round(p["size_mb"], 2), "tipo": p.get("product_type"), "nota": p.get("hint"), "desc": (p.get("description") or "")[:80]} for p in shown],
         use_container_width=True,
@@ -172,12 +172,12 @@ if prods:
     for p in shown:
         mb = p.get("size_mb")
         tag = "?.? MB" if mb is None else ("%.1f MB" % mb)
-        note = p.get("hint") or ""
-        plabels.append("%s | %s | %s" % (p["filename"], tag, note))
+        plabels.append("%s | %s | %s" % (p["filename"], tag, p.get("hint") or ""))
     p_pick = st.selectbox("Selecciona el FITS", plabels)
     prod = shown[plabels.index(p_pick)]
-    if "uncal" in prod["filename"].lower():
-        st.warning("uncal = chip crudo. Mejor i2d (imagen) o x1d (espectro).")
+    low = prod["filename"].lower()
+    if any(k in low for k in ("uncal", "rateints", "_rate.")):
+        st.warning("Producto de detector. No sirve para materiales. Elige i2d o x1d.")
     if st.button("CARGAR FITS ELEGIDO", use_container_width=True):
         try:
             from mast_client import download_product
@@ -216,7 +216,7 @@ raw = st.session_state.get("field_bytes")
 src = st.session_state.get("field_url") or source_url
 
 if not raw:
-    st.info("Busca objeto \u2192 LISTAR TODOS LOS FITS \u2192 selecciona \u2192 CARGAR \u2192 INICIAR.")
+    st.info("Busca objeto \u2192 LISTAR FITS \u2192 filtro recomendados \u2192 CARGAR \u2192 INICIAR.")
 else:
     st.success("ARCHIVO EN BUFFER: %s  (%d KB)" % (name, len(raw) // 1024))
     if st.button("INICIAR", type="primary", use_container_width=True):
@@ -234,6 +234,11 @@ else:
         b.metric("SIZE", "%sx%s" % (metadata["width"], metadata["height"]))
         c.metric("TRUST", "%.2f" % prov["trust_score"])
         d.metric("GATE", prov["verdict"])
+        st.caption("nivel de producto: %s" % prov.get("product_level"))
+        for r in prov.get("reasons") or []:
+            st.caption("> " + r)
+        if prov.get("product_level") == "detector":
+            st.error("GATE.DETECTOR  uncal/rate/rateints. Explorar si, candidato no.")
         fig, ax = plt.subplots(figsize=(5.5, 5.5), facecolor=BG)
         ax.set_facecolor(BG)
         ax.imshow(image, cmap="gray")
@@ -245,8 +250,9 @@ else:
             mc = surrogate_null_test(image, cheap_score_from_image(image), cheap_score_from_image, n_simulations=n_null)
             materials = interpret(plugin_results, float(mc.get("z_score") or 0.0), float(mc.get("p_value") or 1.0))
             nos = morphological_nos(plugin_results)
-            if prov["verdict"] == "reject_for_discovery":
+            if prov["verdict"] != "usable_science" or prov.get("product_level") == "detector":
                 materials["is_candidate"] = False
+                materials["verdict"] = "Producto no valido para frontera. " + str(materials.get("verdict", ""))
             st.write(materials["verdict"])
             st.metric("NOS", "%.2f" % nos["nos"])
             fib = plugin_results.get("fibonacci") or {}

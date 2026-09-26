@@ -1,9 +1,7 @@
-"""Cliente MAST para HST / JWST / Roman."""
+"""Cliente MAST para HST / JWST / Roman. Lista todos los FITS."""
 from __future__ import annotations
-from typing import Dict, List
 
-PREFERRED = ("i2d.fits", "drc.fits", "drz.fits", "sci.fits", "cal.fits", "flt.fits")
-BLOCK = ("jpg", "jpeg", "png", "thumb", "preview", "gif")
+PREFERRED = ("i2d.fits", "drc.fits", "drz.fits", "x1d.fits", "s3d.fits", "cal.fits", "flt.fits", "sci.fits")
 MISSION_ALIASES = {
     "HST": {"HST", "HLA"},
     "JWST": {"JWST"},
@@ -19,7 +17,21 @@ def _mission_ok(raw, selected):
             return True
     return False
 
-def search_observations(target, missions, radius_deg=0.12, limit=30):
+def _hint(name):
+    low = (name or "").lower()
+    if any(s in low for s in ("i2d", "_drz", "_drc")):
+        return "imagen calibrada"
+    if "x1d" in low:
+        return "espectro 1D"
+    if "s3d" in low:
+        return "cubo 3D"
+    if "uncal" in low or "_raw" in low:
+        return "CRUDO detector — no usar para materiales"
+    if "rate" in low or "_cal" in low:
+        return "calibrado intermedio"
+    return ""
+
+def search_observations(target, missions, radius_deg=0.12, limit=80):
     from astroquery.mast import Observations
     table = Observations.query_object(target.strip(), radius="%s deg" % radius_deg)
     if table is None or len(table) == 0:
@@ -52,37 +64,49 @@ def search_observations(target, missions, radius_deg=0.12, limit=30):
             break
     return rows
 
-def list_fits_products(obsid, max_mb=80.0):
+def list_fits_products(obsid, max_mb=None):
     from astroquery.mast import Observations
     products = Observations.get_product_list(obsid)
     if products is None or len(products) == 0:
         return []
     out = []
+    seen = set()
     for rec in products:
         name = str(rec.get("productFilename") or rec.get("filename") or "")
         low = name.lower()
         if not low.endswith((".fits", ".fits.gz")):
             continue
-        if any(b in low for b in BLOCK):
+        if name in seen:
             continue
+        seen.add(name)
         size = rec.get("size")
         try:
             size_mb = float(size) / (1024 * 1024) if size is not None else None
         except (TypeError, ValueError):
             size_mb = None
-        if size_mb is not None and size_mb > max_mb:
+        if max_mb is not None and size_mb is not None and size_mb > max_mb:
             continue
         uri = str(rec.get("dataURI") or "")
-        rank = 50
+        rank = 80
         for i, suf in enumerate(PREFERRED):
             if low.endswith(suf) or suf.replace(".fits", "") in low:
                 rank = i
                 break
-        out.append({"filename": name, "product_type": str(rec.get("productType") or ""), "description": str(rec.get("description") or ""), "size_mb": size_mb, "uri": uri, "rank": rank})
-    out.sort(key=lambda r: (r["rank"], 999 if r["size_mb"] is None else r["size_mb"]))
-    return out[:20]
+        if "uncal" in low:
+            rank = 90
+        out.append({
+            "filename": name,
+            "product_type": str(rec.get("productType") or ""),
+            "description": str(rec.get("description") or rec.get("productSubGroupDescription") or ""),
+            "size_mb": size_mb,
+            "uri": uri,
+            "rank": rank,
+            "hint": _hint(name),
+        })
+    out.sort(key=lambda r: (r["rank"], 9999 if r["size_mb"] is None else r["size_mb"]))
+    return out
 
-def download_product(uri, filename, max_mb=80.0):
+def download_product(uri, filename, max_mb=200.0):
     from astroquery.mast import Observations
     from pathlib import Path
     tmp = Path("/tmp/cms80_mast")
@@ -101,5 +125,5 @@ def download_product(uri, filename, max_mb=80.0):
         path = found[-1]
     data = Path(path).read_bytes()
     if len(data) > max_mb * 1024 * 1024:
-        raise RuntimeError("FITS > %.0f MB" % max_mb)
+        raise RuntimeError("FITS > %.0f MB. Elige uno mas chico (i2d/x1d)." % max_mb)
     return data

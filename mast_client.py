@@ -1,42 +1,59 @@
-"""Cliente MAST: buscar objeto y listar FITS calibrados para elegir."""
+"""Cliente MAST para HST / JWST / Roman."""
 from __future__ import annotations
-
 from typing import Dict, List
 
 PREFERRED = ("i2d.fits", "drc.fits", "drz.fits", "sci.fits", "cal.fits", "flt.fits")
 BLOCK = ("jpg", "jpeg", "png", "thumb", "preview", "gif")
+MISSION_ALIASES = {
+    "HST": {"HST", "HLA"},
+    "JWST": {"JWST"},
+    "ROMAN": {"ROMAN", "RST", "NGRST"},
+    "HLSP": {"HLSP"},
+}
 
+def _mission_ok(raw, selected):
+    raw_u = (raw or "").upper()
+    for sel in selected:
+        aliases = {a.upper() for a in MISSION_ALIASES.get(sel.upper(), {sel})}
+        if raw_u in aliases or sel.upper() in raw_u:
+            return True
+    return False
 
-def search_observations(target: str, missions: List[str], radius_deg: float = 0.08, limit: int = 25) -> List[Dict]:
+def search_observations(target, missions, radius_deg=0.12, limit=30):
     from astroquery.mast import Observations
-
-    table = Observations.query_object(target.strip(), radius=f"{radius_deg} deg")
+    table = Observations.query_object(target.strip(), radius="%s deg" % radius_deg)
     if table is None or len(table) == 0:
         return []
-    missions_u = {m.upper() for m in missions}
     rows = []
     for rec in table:
         mission = str(rec.get("obs_collection") or rec.get("project") or "")
-        if missions_u and mission.upper() not in missions_u:
+        if missions and not _mission_ok(mission, missions):
             continue
-        if str(rec.get("dataproduct_type") or "").lower() in {"timeseries", "catalog"}:
+        dtype = str(rec.get("dataproduct_type") or "").lower()
+        if dtype in {"timeseries", "catalog"}:
             continue
+        jpeg = str(rec.get("jpegURL") or "")
+        if jpeg.startswith("/") and not jpeg.startswith("http"):
+            jpeg = "https://mast.stsci.edu" + jpeg
         rows.append({
-            "obsid": str(rec.get("obsid") or rec.get("obs_id") or ""),
+            "obsid": str(rec.get("obsid") or ""),
             "obs_id": str(rec.get("obs_id") or ""),
             "mission": mission,
-            "instrument": str(rec.get("instrument_name") or rec.get("instrument") or ""),
-            "filters": str(rec.get("filters") or rec.get("filter") or ""),
+            "instrument": str(rec.get("instrument_name") or ""),
+            "filters": str(rec.get("filters") or ""),
             "target": str(rec.get("target_name") or target),
+            "s_ra": rec.get("s_ra"),
+            "s_dec": rec.get("s_dec"),
+            "t_exptime": rec.get("t_exptime"),
+            "jpeg_url": jpeg if jpeg.startswith("http") else "",
+            "dataproduct_type": dtype,
         })
         if len(rows) >= limit:
             break
     return rows
 
-
-def list_fits_products(obsid: str, max_mb: float = 80.0) -> List[Dict]:
+def list_fits_products(obsid, max_mb=80.0):
     from astroquery.mast import Observations
-
     products = Observations.get_product_list(obsid)
     if products is None or len(products) == 0:
         return []
@@ -44,7 +61,7 @@ def list_fits_products(obsid: str, max_mb: float = 80.0) -> List[Dict]:
     for rec in products:
         name = str(rec.get("productFilename") or rec.get("filename") or "")
         low = name.lower()
-        if not low.endswith(".fits") and not low.endswith(".fits.gz"):
+        if not low.endswith((".fits", ".fits.gz")):
             continue
         if any(b in low for b in BLOCK):
             continue
@@ -61,22 +78,13 @@ def list_fits_products(obsid: str, max_mb: float = 80.0) -> List[Dict]:
             if low.endswith(suf) or suf.replace(".fits", "") in low:
                 rank = i
                 break
-        out.append({
-            "filename": name,
-            "product_type": str(rec.get("productType") or ""),
-            "description": str(rec.get("description") or ""),
-            "size_mb": size_mb,
-            "uri": uri,
-            "rank": rank,
-        })
-    out.sort(key=lambda r: (r["rank"], r["size_mb"] if r["size_mb"] is not None else 999))
+        out.append({"filename": name, "product_type": str(rec.get("productType") or ""), "description": str(rec.get("description") or ""), "size_mb": size_mb, "uri": uri, "rank": rank})
+    out.sort(key=lambda r: (r["rank"], 999 if r["size_mb"] is None else r["size_mb"]))
     return out[:20]
 
-
-def download_product(uri: str, filename: str, max_mb: float = 80.0):
+def download_product(uri, filename, max_mb=80.0):
     from astroquery.mast import Observations
     from pathlib import Path
-
     tmp = Path("/tmp/cms80_mast")
     tmp.mkdir(parents=True, exist_ok=True)
     dest = tmp / filename
@@ -84,14 +92,14 @@ def download_product(uri: str, filename: str, max_mb: float = 80.0):
     path = dest
     if isinstance(status, tuple):
         for item in status:
-            if isinstance(item, str) and item.endswith((".fits", ".fits.gz")) and Path(item).exists():
+            if isinstance(item, str) and Path(item).exists():
                 path = Path(item)
     if not Path(path).exists():
         found = list(tmp.glob("*.fits")) + list(tmp.glob("*.fits.gz"))
         if not found:
-            raise RuntimeError(f"download fallo: {status}")
+            raise RuntimeError("download fallo: %s" % (status,))
         path = found[-1]
     data = Path(path).read_bytes()
     if len(data) > max_mb * 1024 * 1024:
-        raise RuntimeError(f"FITS > {max_mb:.0f} MB")
+        raise RuntimeError("FITS > %.0f MB" % max_mb)
     return data

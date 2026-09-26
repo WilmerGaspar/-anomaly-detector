@@ -1,4 +1,4 @@
-"""CMS-80. Sin cache sobre archivos. INICIAR + Fibonacci."""
+"""CMS-80. Lista todos los FITS de la observacion."""
 from datetime import datetime
 import io
 
@@ -12,7 +12,6 @@ from candidate_export import build_candidate, dumps_candidate
 from materials_map import interpret
 from nos_morphological import morphological_nos
 from provenance import assess_provenance
-from report_generator import generate_report
 from scoring import cheap_score_from_image, compute_global_score, surrogate_null_test
 
 PHOSPHOR = "#33ff66"
@@ -28,7 +27,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.markdown("## CMS-80  COSMIC MATERIALS SCOUT")
-st.caption("MAST Hubble / Webb / Roman  \u00b7  preview + FITS  \u00b7  INICIAR")
+st.caption("MAST Hubble / Webb / Roman  \u00b7  elige el FITS de la lista")
 
 st.sidebar.markdown("`CONFIG`")
 source_url = st.sidebar.text_input("URL FITS DIRECTO", value="")
@@ -127,7 +126,7 @@ if go_q and target.strip():
             st.session_state["mast_obs"] = search_observations(target, missions)
         st.session_state.pop("mast_prods", None)
         if not st.session_state["mast_obs"]:
-            st.warning("Nada en esas misiones. Roman puede no tener campo publico aun.")
+            st.warning("Nada en esas misiones.")
     except Exception as exc:
         st.error("MAST.ERR  " + str(exc))
 
@@ -138,32 +137,51 @@ if obs_rows:
     chosen = obs_rows[labels.index(pick)]
     left, right = st.columns(2)
     with left:
-        st.json({"mision": chosen["mission"], "instrumento": chosen["instrument"], "filtro": chosen["filters"], "objetivo": chosen["target"], "RA": chosen.get("s_ra"), "Dec": chosen.get("s_dec"), "exptime": chosen.get("t_exptime"), "obs_id": chosen["obs_id"]})
+        st.json({"mision": chosen["mission"], "instrumento": chosen["instrument"], "filtro": chosen["filters"], "objetivo": chosen["target"], "RA": chosen.get("s_ra"), "Dec": chosen.get("s_dec"), "obs_id": chosen["obs_id"]})
     with right:
         if chosen.get("jpeg_url"):
             st.image(chosen["jpeg_url"], caption="preview MAST")
         else:
-            st.caption("Sin preview JPEG en esta fila.")
-    if st.button("VER FITS DE ESTA FOTO", use_container_width=True):
+            st.caption("Sin preview JPEG.")
+    if st.button("LISTAR TODOS LOS FITS", use_container_width=True):
         try:
             from mast_client import list_fits_products
-            with st.spinner("listando productos..."):
+            with st.spinner("listando todos los FITS..."):
                 st.session_state["mast_prods"] = list_fits_products(chosen["obsid"])
         except Exception as exc:
             st.error("MAST.ERR  " + str(exc))
 
 prods = st.session_state.get("mast_prods") or []
 if prods:
+    st.caption("%d archivos FITS en esta observacion" % len(prods))
+    filtro = st.radio("Filtro", ["todos", "recomendados (i2d/drz/x1d)", "crudos (uncal)"], horizontal=True)
+    shown = prods
+    if filtro.startswith("recomendados"):
+        shown = [p for p in prods if any(k in p["filename"].lower() for k in ("i2d", "drz", "drc", "x1d", "s3d"))]
+    elif filtro.startswith("crudos"):
+        shown = [p for p in prods if "uncal" in p["filename"].lower()]
+    if not shown:
+        shown = prods
+        st.warning("Ese filtro quedo vacio; muestro todos.")
+    st.dataframe(
+        [{"archivo": p["filename"], "MB": None if p.get("size_mb") is None else round(p["size_mb"], 2), "tipo": p.get("product_type"), "nota": p.get("hint"), "desc": (p.get("description") or "")[:80]} for p in shown],
+        use_container_width=True,
+        hide_index=True,
+    )
     plabels = []
-    for p in prods:
+    for p in shown:
         mb = p.get("size_mb")
-        plabels.append("%s (%s)" % (p["filename"], "?.? MB" if mb is None else ("%.1f MB" % mb)))
-    p_pick = st.selectbox("Producto FITS (<80 MB)", plabels)
-    prod = prods[plabels.index(p_pick)]
-    if st.button("CARGAR FITS", use_container_width=True):
+        tag = "?.? MB" if mb is None else ("%.1f MB" % mb)
+        note = p.get("hint") or ""
+        plabels.append("%s | %s | %s" % (p["filename"], tag, note))
+    p_pick = st.selectbox("Selecciona el FITS", plabels)
+    prod = shown[plabels.index(p_pick)]
+    if "uncal" in prod["filename"].lower():
+        st.warning("uncal = chip crudo. Mejor i2d (imagen) o x1d (espectro).")
+    if st.button("CARGAR FITS ELEGIDO", use_container_width=True):
         try:
             from mast_client import download_product
-            with st.spinner("bajando FITS..."):
+            with st.spinner("bajando %s ..." % prod["filename"]):
                 blob = download_product(prod["uri"], prod["filename"])
             st.session_state["field_name"] = prod["filename"]
             st.session_state["field_bytes"] = blob
@@ -198,7 +216,7 @@ raw = st.session_state.get("field_bytes")
 src = st.session_state.get("field_url") or source_url
 
 if not raw:
-    st.info("Busca un objeto, carga el FITS y pulsa INICIAR.")
+    st.info("Busca objeto \u2192 LISTAR TODOS LOS FITS \u2192 selecciona \u2192 CARGAR \u2192 INICIAR.")
 else:
     st.success("ARCHIVO EN BUFFER: %s  (%d KB)" % (name, len(raw) // 1024))
     if st.button("INICIAR", type="primary", use_container_width=True):
@@ -212,7 +230,7 @@ else:
     else:
         prov = assess_provenance(metadata["filename"], metadata, src)
         a, b, c, d = st.columns(4)
-        a.metric("FILE", metadata["filename"][:18])
+        a.metric("FILE", metadata["filename"][:22])
         b.metric("SIZE", "%sx%s" % (metadata["width"], metadata["height"]))
         c.metric("TRUST", "%.2f" % prov["trust_score"])
         d.metric("GATE", prov["verdict"])
@@ -234,8 +252,6 @@ else:
             fib = plugin_results.get("fibonacci") or {}
             if fib:
                 st.metric("PHI HITS", str(fib.get("n_phi_pairs", 0)))
-                st.caption("ratio=%.3f  err=%.3f  score=%.2f" % (fib.get("best_ratio") or 0, fib.get("phi_error") or 1, fib.get("fibonacci_score") or 0))
-            st.write(materials["dominant_label"] + "  |  " + materials["lab_analog"])
             fam = materials["family_scores"]
             figb = px.bar(x=list(fam.keys()), y=list(fam.values()), title="MEZCLA")
             figb.update_traces(marker_color=PHOSPHOR)

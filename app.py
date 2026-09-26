@@ -1,625 +1,416 @@
-"""
-Anomaly Detector - Versión Web con Streamlit
-Aplicación web ligera para análisis de anomalías.
-"""
-import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
-from PIL import Image
-import io
-import sys
-import os
+"""CMS-80 Cosmic Materials Scout. Terminal fosforosa."""
 from datetime import datetime
+
+import matplotlib.pyplot as plt
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from plotly.subplots import make_subplots
+import streamlit as st
+from PIL import Image
+
+from candidate_export import build_candidate, dumps_candidate
+from materials_map import interpret
+from nos_morphological import morphological_nos
+from provenance import assess_provenance
 from report_generator import generate_report
+from scoring import cheap_score_from_image, compute_global_score, surrogate_null_test
 
-# Configurar página
-st.set_page_config(
-    page_title="Anomaly Detector",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+PHOSPHOR = "#33ff66"
+PHOSPHOR_DIM = "#1a8f3c"
+BG = "#020803"
 
-# CSS personalizado para mejorar apariencia
+st.set_page_config(page_title="CMS-80 | COSMIC MATERIALS SCOUT", page_icon="■", layout="wide", initial_sidebar_state="expanded")
+
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
 <style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 3rem;
-    }
-    .score-box {
-        padding: 2rem;
-        border-radius: 10px;
-        text-align: center;
-        font-size: 3rem;
-        font-weight: bold;
-        color: white;
-        margin: 1rem 0;
-    }
-    .score-low { background-color: #28a745; }
-    .score-medium { background-color: #ffc107; color: #333; }
-    .score-high { background-color: #dc3545; }
-    .metric-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 4px solid #1f77b4;
-        margin: 0.5rem 0;
-    }
-    .plugin-box {
-        background-color: #f0f2f6;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
+html, body, [class*="css"] { font-family: "Share Tech Mono", "VT323", ui-monospace, monospace !important; }
+.stApp {
+  background: repeating-linear-gradient(0deg, rgba(0,255,80,0.035) 0px, rgba(0,255,80,0.035) 1px, transparent 1px, transparent 3px),
+              radial-gradient(ellipse at center, #051a0c 0%, #020803 70%);
+  color: #b7ffc2;
+}
+.stApp::after {
+  content: ""; pointer-events: none; position: fixed; inset: 0;
+  background: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,0.18) 50%);
+  background-size: 100% 4px; z-index: 9999;
+}
+h1, h2, h3 { font-family: "VT323", monospace !important; color: #33ff66 !important; text-shadow: 0 0 8px #1aff55; }
+.crt-banner { border: 1px solid #33ff66; box-shadow: 0 0 12px #145c28; padding: 0.85rem 1.1rem; margin: 0.4rem 0 1.1rem 0; color: #9dffb0; background: #031108; }
+.crt-line { color: #33ff66; font-size: 1.35rem; }
+.crt-sub { color: #7cbb88; font-size: 0.92rem; }
+.blink { animation: blink 1.2s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+[data-testid="stSidebar"] { background: #010604 !important; border-right: 1px solid #1a8f3c; }
+.stButton>button { background: #031108 !important; color: #33ff66 !important; border: 1px solid #33ff66 !important; border-radius: 0 !important; }
+[data-testid="stMetricValue"] { color: #33ff66 !important; font-family: "VT323", monospace !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# Título principal
-st.markdown('<h1 class="main-header">🔬 Anomaly Detector</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Sistema de Análisis de Anomalías con Deep Learning</p>', unsafe_allow_html=True)
+st.markdown("""
+<div class="crt-banner">
+  <div class="crt-line">CMS-80  COSMIC MATERIALS SCOUT  <span class="blink">&#9608;</span></div>
+  <div class="crt-sub">SYS.READY | FITS ARCHIVE PREFERRED | MIR LIBRARY HANDOFF | NO PRESS JPEG DISCOVERY</div>
+</div>
+""", unsafe_allow_html=True)
 
-# Sidebar - Configuración
-st.sidebar.title("⚙️ Configuración")
-
-# Modo de análisis
-mode = st.sidebar.selectbox(
-    "Modo de Análisis",
-    ["balanced", "explorer", "conservative"],
-    help="• Explorer: Máxima sensibilidad\n• Balanced: Equilibrio recomendado\n• Conservative: Solo anomalías claras"
-)
-
-# Plugins activos
-st.sidebar.markdown("### 🔌 Plugins Activos")
+st.sidebar.markdown("`CMS-80 / CONFIG`")
+source_url = st.sidebar.text_input("URL DE ORIGEN / FITS DIRECTO", value="")
+st.sidebar.caption("Pega un .fits de MAST. PNG de galeria = GATE.REJECT")
+mode = st.sidebar.selectbox("MODO", ["balanced", "explorer", "conservative"])
+st.sidebar.markdown("`DESCRIPTORES`")
 plugins = {
-    'fractal_base': st.sidebar.checkbox('Fractal (D0/D1/D2)', value=True),
-    'kolmogorov_1941': st.sidebar.checkbox('Turbulencia (Kolmogorov)', value=True),
-    'lyapunov_stability': st.sidebar.checkbox('Caos (Lyapunov)', value=True),
-    'persistent_homology': st.sidebar.checkbox('Topología', value=True),
-    'renormalization_group': st.sidebar.checkbox('Criticalidad', value=True)
-    ,
-    'anisotropy': st.sidebar.checkbox('Anisotropía', value=True),
-    'entropy': st.sidebar.checkbox('Entropía', value=True)
+    "fractal_base": st.sidebar.checkbox("FRACTAL D0/D1/D2", value=True),
+    "kolmogorov_1941": st.sidebar.checkbox("CASCADA / P(k)", value=True),
+    "periodicity": st.sidebar.checkbox("RED / PICOS FFT", value=True),
+    "anisotropy": st.sidebar.checkbox("FILAMENTO / ANISO", value=True),
+    "persistent_homology": st.sidebar.checkbox("TOPOLOGIA", value=True),
+    "renormalization_group": st.sidebar.checkbox("COARSE-GRAIN", value=True),
+    "lyapunov_stability": st.sidebar.checkbox("ROSENSTEIN", value=True),
+    "entropy": st.sidebar.checkbox("SHANNON", value=True),
 }
-
 active_plugins = [k for k, v in plugins.items() if v]
+n_null = st.sidebar.slider("SUBROGADOS NULOS", 10, 80, 24, 2)
+st.sidebar.caption("JPEG de galeria NASA = ilustracion. Candidato solo con FITS + espectro MIR.")
 
-# Opciones de salida
-st.sidebar.markdown("### 📄 Opciones")
-generate_pdf = st.sidebar.checkbox('Generar PDF', value=True)
-show_charts = st.sidebar.checkbox('Mostrar gráficos', value=True)
 
-# Información en sidebar
-st.sidebar.markdown("---")
-st.sidebar.markdown("### ℹ️ Información")
-st.sidebar.info("""
-**Formatos soportados:**
-• JPG, PNG, TIFF
-• FITS, FIT (Astronomía)
+def _crt_layout(fig):
+    fig.update_layout(paper_bgcolor=BG, plot_bgcolor="#031108", font=dict(color=PHOSPHOR, family="Share Tech Mono"), margin=dict(t=40, b=30, l=40, r=20))
+    fig.update_xaxes(gridcolor="#0d3a18", color=PHOSPHOR_DIM)
+    fig.update_yaxes(gridcolor="#0d3a18", color=PHOSPHOR_DIM)
+    return fig
 
-**Versión:** 1.0.0 Web
-""")
 
-# Carga de archivo
-st.markdown("### 📁 Cargar Imagen")
-uploaded_file = st.file_uploader(
-    "Arrastra o selecciona una imagen",
-    type=['jpg', 'jpeg', 'png', 'tiff', 'tif', 'fits', 'fit'],
-    help="Soporta imágenes estándar y archivos FITS astronómicos"
-)
+class _MemFile:
+    def __init__(self, name, data):
+        self.name = name
+        self._buf = __import__("io").BytesIO(data)
+    def read(self, *a, **k):
+        return self._buf.read(*a, **k)
+    def seek(self, *a, **k):
+        return self._buf.seek(*a, **k)
 
-# Funciones de utilidad
+
+def fetch_url_file(url: str, max_mb: float = 80.0):
+    import requests
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return None, "URL invalida"
+    name = url.split("?")[0].rstrip("/").split("/")[-1] or "remote.fits"
+    r = requests.get(url, timeout=60, stream=True)
+    r.raise_for_status()
+    cap = int(max_mb * 1024 * 1024)
+    chunks, total = [], 0
+    for blk in r.iter_content(1024 * 64):
+        total += len(blk)
+        if total > cap:
+            return None, f"FITS > {max_mb:.0f} MB. Recorta o corre local."
+        chunks.append(blk)
+    return _MemFile(name, b"".join(chunks)), None
+
+
 @st.cache_data
 def load_and_preprocess_image(uploaded_file):
-    """Carga y preprocesa la imagen."""
     try:
-        # Verificar si es FITS
-        if uploaded_file.name.lower().endswith(('.fits', '.fit')):
+        name = uploaded_file.name.lower()
+        if name.endswith((".fits", ".fit", ".fits.gz")):
             from astropy.io import fits
-            
-            # Leer FITS
             with fits.open(uploaded_file) as hdul:
-                # Buscar extensión SCI o primera con datos
                 data = None
                 for hdu in hdul:
-                    if hasattr(hdu, 'data') and hdu.data is not None:
-                        if hasattr(hdu, 'name') and hdu.name == 'SCI':
-                            data = hdu.data
-                            break
-                
+                    if getattr(hdu, "data", None) is not None and getattr(hdu, "name", "") == "SCI":
+                        data = hdu.data
+                        break
                 if data is None:
                     for hdu in hdul:
-                        if hasattr(hdu, 'data') and hdu.data is not None:
+                        if getattr(hdu, "data", None) is not None:
                             data = hdu.data
                             break
-                
                 if data is None:
-                    return None, None, "No se encontraron datos en el archivo FITS"
-                
-                # Normalizar
-                data = np.array(data, dtype=np.float32)
-                data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-                
+                    return None, None, "NO SCI DATA IN FITS"
+                data = np.nan_to_num(np.array(data, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+                if data.ndim > 2:
+                    data = np.squeeze(data)
+                    if data.ndim > 2:
+                        data = data[0]
                 p2, p98 = np.percentile(data, [2, 98])
                 if p98 > p2:
                     data = (data - p2) / (p98 - p2)
                 data = np.clip(data, 0.0, 1.0)
-                
-                # Metadatos
                 header = hdul[0].header
                 metadata = {
-                    'filename': uploaded_file.name,
-                    'format': 'FITS',
-                    'width': data.shape[1],
-                    'height': data.shape[0],
-                    'is_fits': True
+                    "filename": uploaded_file.name,
+                    "format": "FITS",
+                    "width": int(data.shape[1]),
+                    "height": int(data.shape[0]),
+                    "is_fits": True,
+                    "instrument": str(header.get("INSTRUME", header.get("TELESCOP", ""))),
+                    "filter": str(header.get("FILTER", header.get("FILTER1", ""))),
                 }
-                
-                if 'DATE-OBS' in header:
-                    metadata['date_obs'] = str(header['DATE-OBS'])
-                if 'EXPTIME' in header:
-                    metadata['exposure_time'] = float(header['EXPTIME'])
-                if 'FILTER' in header:
-                    metadata['filter'] = str(header['FILTER'])
-                
                 return data, metadata, None
-        
-        else:
-            # Imagen estándar
-            image = Image.open(uploaded_file)
-            
-            metadata = {
-                'filename': uploaded_file.name,
-                'format': image.format,
-                'width': image.width,
-                'height': image.height,
-                'is_fits': False
-            }
-            
-            # Convertir a escala de grises
-            if image.mode != 'L':
-                image = image.convert('L')
-            
-            img_array = np.array(image, dtype=np.float32) / 255.0
-            
-            return img_array, metadata, None
-            
-    except Exception as e:
-        return None, None, str(e)
-
-def create_score_gauge(score):
-    """Crea gráfico de medidor circular."""
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = score * 100,
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': "Score de Anomalía", 'font': {'size': 24}},
-        delta = {'reference': 50, 'increasing': {'color': "red"}},
-        gauge = {
-            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-            'bar': {'color': "darkblue"},
-            'bgcolor': "white",
-            'borderwidth': 2,
-            'bordercolor': "gray",
-            'steps': [
-                {'range': [0, 40], 'color': '#90EE90'},
-                {'range': [40, 70], 'color': '#FFD700'},
-                {'range': [70, 100], 'color': '#FF6B6B'}
-            ],
-            'threshold': {
-                'line': {'color': "red", 'width': 4},
-                'thickness': 0.75,
-                'value': 50
-            }
+        image = Image.open(uploaded_file)
+        metadata = {
+            "filename": uploaded_file.name,
+            "format": image.format,
+            "width": image.width,
+            "height": image.height,
+            "is_fits": False,
+            "instrument": "",
+            "filter": "",
         }
+        if image.mode != "L":
+            image = image.convert("L")
+        return np.array(image, dtype=np.float32) / 255.0, metadata, None
+    except Exception as exc:
+        return None, None, str(exc)
+
+
+def create_score_gauge(score: float, title: str):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score * 100,
+        title={"text": title, "font": {"size": 16, "color": PHOSPHOR}},
+        number={"font": {"color": PHOSPHOR}},
+        gauge={
+            "axis": {"range": [0, 100], "tickcolor": PHOSPHOR},
+            "bar": {"color": PHOSPHOR},
+            "bgcolor": "#031108",
+            "bordercolor": PHOSPHOR_DIM,
+            "steps": [
+                {"range": [0, 40], "color": "#062010"},
+                {"range": [40, 70], "color": "#0a3a16"},
+                {"range": [70, 100], "color": "#125522"},
+            ],
+        },
     ))
-    
-    fig.update_layout(height=400)
+    fig.update_layout(height=280, paper_bgcolor=BG, font={"color": PHOSPHOR}, margin=dict(t=40, b=10))
     return fig
 
-def run_analysis(image, active_plugins, mode):
-    """Ejecuta el análisis completo."""
+
+def run_analysis(image, active):
     results = {}
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # 1. Fractal
-    if 'fractal_base' in active_plugins:
-        status_text.text("🌀 Calculando dimensión fractal...")
-        from plugins.fractal_base import FractalBase
-        plugin = FractalBase()
-        results['fractal_base'] = plugin.analyze(image)
-        progress_bar.progress(20)
-    
-    # 2. Kolmogorov
-    if 'kolmogorov_1941' in active_plugins:
-        status_text.text("🌊 Analizando espectro de turbulencia...")
-        from plugins.kolmogorov_1941 import Kolmogorov1941
-        plugin = Kolmogorov1941()
-        results['kolmogorov_1941'] = plugin.analyze(image)
-        progress_bar.progress(40)
-    
-    # 3. Lyapunov
-    if 'lyapunov_stability' in active_plugins:
-        status_text.text("🔄 Calculando exponentes de Lyapunov...")
-        from plugins.lyapunov_stability import LyapunovStability
-        plugin = LyapunovStability()
-        results['lyapunov_stability'] = plugin.analyze(image)
-        progress_bar.progress(60)
-    
-    # 4. Homología
-    if 'persistent_homology' in active_plugins:
-        status_text.text("🔄 Analizando topología...")
-        from plugins.persistent_homology import PersistentHomology
-        plugin = PersistentHomology()
-        results['persistent_homology'] = plugin.analyze(image)
-        progress_bar.progress(80)
-    
-    # 5. Renormalization
-    if 'renormalization_group' in active_plugins:
-        status_text.text("⚛️ Analizando criticalidad...")
-        from plugins.renormalization_group import RenormalizationGroup
-        plugin = RenormalizationGroup()
-        results['renormalization_group'] = plugin.analyze(image)
-        progress_bar.progress(80)
-
-    # 6. Anisotropía
-    if 'anisotropy' in active_plugins:
-        status_text.text("📐 Calculando anisotropía...")
+    progress = st.progress(0)
+    status = st.empty()
+    class_steps = [
+        ("fractal_base", "FRACTAL", "plugins.fractal_base", "FractalBase"),
+        ("kolmogorov_1941", "P(k)", "plugins.kolmogorov_1941", "Kolmogorov1941"),
+        ("lyapunov_stability", "ROSENSTEIN", "plugins.lyapunov_stability", "LyapunovStability"),
+        ("persistent_homology", "TOPOLOGY", "plugins.persistent_homology", "PersistentHomology"),
+        ("renormalization_group", "RG-BLOCK", "plugins.renormalization_group", "RenormalizationGroup"),
+    ]
+    n = max(len(active), 1)
+    done = 0
+    for key, label, modname, clsname in class_steps:
+        if key not in active:
+            continue
+        status.text(f"> RUN {label}")
+        mod = __import__(modname, fromlist=[clsname])
+        results[key] = getattr(mod, clsname)().analyze(image)
+        done += 1
+        progress.progress(min(done / n, 1.0))
+    if "anisotropy" in active:
         from plugins.anisotropy import calculate_anisotropy
-        results['anisotropy'] = calculate_anisotropy(image)
-        progress_bar.progress(90)
-
-    # 7. Entropía
-    if 'entropy' in active_plugins:
-        status_text.text("🔎 Calculando entropía e información...")
+        status.text("> RUN ANISO")
+        results["anisotropy"] = calculate_anisotropy(image)
+        done += 1
+        progress.progress(min(done / n, 1.0))
+    if "entropy" in active:
         from plugins.entropy import calculate_entropy
-        results['entropy'] = calculate_entropy(image)
-        progress_bar.progress(100)
-    
-    status_text.empty()
-    progress_bar.empty()
-    
+        status.text("> RUN ENTROPY")
+        results["entropy"] = calculate_entropy(image)
+        done += 1
+        progress.progress(min(done / n, 1.0))
+    if "periodicity" in active:
+        from plugins.periodicity import analyze_periodicity
+        status.text("> RUN FFT PEAKS")
+        results["periodicity"] = analyze_periodicity(image)
+        done += 1
+        progress.progress(min(done / n, 1.0))
+    status.empty()
+    progress.empty()
     return results
 
-def compute_global_score(plugin_results, mode):
-    """Calcula score global."""
-    scores = []
-    
-    if 'fractal_base' in plugin_results:
-        fractal = plugin_results['fractal_base']
-        scores.append(fractal.get('complexity_score', 0.5))
-    
-    if 'kolmogorov_1941' in plugin_results:
-        turb = plugin_results['kolmogorov_1941']
-        scores.append(turb.get('intermittency_factor', 0) * 0.7 + turb.get('turbulence_intensity', 0.5) * 0.3)
-    
-    if 'lyapunov_stability' in plugin_results:
-        chaos = plugin_results['lyapunov_stability']
-        scores.append(chaos.get('chaos_strength', 0))
-    
-    if 'persistent_homology' in plugin_results:
-        topo = plugin_results['persistent_homology']
-        scores.append(topo.get('complexity_score', 0.5))
-    
-    if 'renormalization_group' in plugin_results:
-        rg = plugin_results['renormalization_group']
-        scores.append(rg.get('criticality_score', 0))
-    
-    if scores:
-        score = np.mean(scores)
-    else:
-        score = 0.5
-    
-    # Ajustar por modo
-    if mode == 'explorer':
-        score = min(score * 1.2, 1.0)
-    elif mode == 'conservative':
-        score = score * 0.8
-    
-    return np.clip(score, 0.0, 1.0)
 
-def monte_carlo_validation(score, n_simulations=10000):
-    """Validación Monte Carlo.
+def parse_spectrum_csv(file) -> dict:
+    import pandas as pd
+    df = pd.read_csv(file)
+    if len(df.columns) < 2:
+        return {"status": "error", "kind": None, "xy": None, "notes": "CSV necesita 2 columnas x,y"}
+    cols = [c.lower() for c in df.columns]
+    xcol, ycol = df.columns[0], df.columns[1]
+    for i, c in enumerate(cols):
+        if c in {"x", "wavenumber", "wavelength", "um", "cm-1", "lambda"}:
+            xcol = df.columns[i]
+        if c in {"y", "flux", "intensity", "absorbance", "i"}:
+            ycol = df.columns[i]
+    xy = [{"x": float(a), "y": float(b)} for a, b in zip(df[xcol], df[ycol]) if np.isfinite(a) and np.isfinite(b)]
+    kind = "ftir_or_mir" if "cm" in str(xcol).lower() or "wave" in str(xcol).lower() else "unknown"
+    return {"status": "loaded", "kind": kind, "xy": xy[:8000], "notes": f"{len(xy)} puntos desde {file.name}"}
 
-    Devuelve p-value, marcadores de significancia, y estadísticas de la
-    distribución nula (media, std, error estándar y CI 95%).
-    """
-    # No fijar la semilla globalmente aquí para evitar resultados deterministas
-    null_dist = np.random.beta(2, 5, n_simulations)
-    p_value = np.mean(null_dist >= score)
 
-    null_mean = float(np.mean(null_dist))
-    null_std = float(np.std(null_dist, ddof=1))
-    null_se = float(null_std / np.sqrt(max(1, n_simulations)))
-    ci_lower = float(null_mean - 1.96 * null_se)
-    ci_upper = float(null_mean + 1.96 * null_se)
+uploaded_file = st.file_uploader("LOAD FIELD  [FITS / FIT / PNG / JPG / TIFF]", type=["jpg", "jpeg", "png", "tiff", "tif", "fits", "fit"])
+if uploaded_file is None and source_url.strip().lower().endswith((".fits", ".fit", ".fits.gz")):
+    if st.button("PULL FITS FROM URL", use_container_width=True):
+        with st.spinner("> HTTP GET"):
+            try:
+                remote, err = fetch_url_file(source_url)
+            except Exception as exc:
+                remote, err = None, str(exc)
+        if err:
+            st.error(f"NET.ERR  {err}")
+        else:
+            uploaded_file = remote
+            st.session_state["remote_fits"] = remote
+if uploaded_file is None and "remote_fits" in st.session_state:
+    uploaded_file = st.session_state["remote_fits"]
 
-    if p_value < 0.001:
-        stars = "***"
-    elif p_value < 0.01:
-        stars = "**"
-    elif p_value < 0.05:
-        stars = "*"
-    else:
-        stars = "ns"
-
-    return {
-        'p_value': p_value,
-        'stars': stars,
-        'is_significant': p_value < 0.05,
-        'null_mean': null_mean,
-        'null_std': null_std,
-        'null_se': null_se,
-        'null_ci95': [ci_lower, ci_upper],
-        'n_simulations': n_simulations
-    }
-
-# Procesamiento principal
-if uploaded_file is not None:
-    # Cargar imagen
-    with st.spinner('Cargando imagen...'):
+if uploaded_file is None:
+    st.markdown("""
+```
+CMS-80 BOOT
+  [1] FITS de MAST / ALMA / ESO      = canal ciencia
+  [2] JPEG HubbleSite / Webb gallery = ilustracion
+  [3] Scout morfologico              = familia + NOS
+  [4] Libreria MIR                   = espectro x,y de la MISMA region
+  [5] Frontera                       = mir_unknown + FITS de archivo
+NOMBRE UN MINERAL DESDE UN PNG = SYS.REFUSE
+```
+""")
+else:
+    with st.spinner("> MOUNT DATASET"):
         image, metadata, error = load_and_preprocess_image(uploaded_file)
-    
     if error:
-        st.error(f"❌ Error cargando imagen: {error}")
+        st.error(f"SYS.ERR  {error}")
     else:
-        # Mostrar información
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Archivo", metadata['filename'])
-        with col2:
-            st.metric("Dimensiones", f"{metadata['width']} x {metadata['height']}")
-        with col3:
-            fmt = "FITS" if metadata['is_fits'] else metadata['format']
-            st.metric("Formato", fmt)
-        
-        # Mostrar imagen
-        st.markdown("### 🖼️ Vista Previa")
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.imshow(image, cmap='gray')
-        ax.axis('off')
+        prov = assess_provenance(metadata["filename"], metadata, source_url)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("FILE", metadata["filename"][:18])
+        c2.metric("SIZE", f"{metadata['width']}x{metadata['height']}")
+        c3.metric("TRUST", f"{prov['trust_score']:.2f}")
+        c4.metric("GATE", prov["verdict"])
+        if prov["verdict"] == "reject_for_discovery":
+            st.error("GATE.REJECT  fuente tipo prensa/JPEG. Explorar si, publicar no.")
+        elif prov["verdict"] == "exploratory_only":
+            st.warning("GATE.WARN  exploratorio. No cuenta como frontera.")
+        else:
+            st.success("GATE.OK  FITS de archivo. Canal ciencia abierto.")
+        for r in prov["reasons"]:
+            st.caption(f"> {r}")
+        fig, ax = plt.subplots(figsize=(6.2, 6.2), facecolor=BG)
+        ax.set_facecolor(BG)
+        ax.imshow(image, cmap="gray")
+        ax.axis("off")
         st.pyplot(fig)
-        
-        # Botón de análisis
-        if st.button('🚀 INICIAR ANÁLISIS', type='primary', use_container_width=True):
-            
-            # Ejecutar análisis
-            with st.spinner('Analizando... Esto puede tomar unos minutos'):
-                plugin_results = run_analysis(image, active_plugins, mode)
-            
-            # Calcular score global
+        plt.close(fig)
+        allow_candidate = prov["verdict"] != "reject_for_discovery"
+        run_label = "SCAN FIELD" if allow_candidate else "SCAN FIELD  (exploratorio)"
+        if st.button(run_label, type="primary", use_container_width=True):
+            with st.spinner("> DESCRIPTORS"):
+                plugin_results = run_analysis(image, active_plugins)
             global_score = compute_global_score(plugin_results, mode)
-            mc_results = monte_carlo_validation(global_score)
-            
-            # Mostrar resultados principales
-            st.markdown("---")
-            st.markdown("## 📊 RESULTADOS DEL ANÁLISIS")
-            
+            observed_cheap = cheap_score_from_image(image)
+            mc_results = surrogate_null_test(image, observed_cheap, cheap_score_from_image, n_simulations=n_null)
+            materials = interpret(plugin_results, structure_z=float(mc_results.get("z_score") or 0.0), p_value=float(mc_results.get("p_value") or 1.0))
+            nos = morphological_nos(plugin_results)
+            if not allow_candidate:
+                materials["is_candidate"] = False
+                materials["verdict"] = "Fuente no publicable. " + str(materials.get("verdict", ""))
+            st.markdown("## `HYPOTHESIS`")
+            if materials["is_candidate"] and allow_candidate:
+                st.success(materials["verdict"])
+            elif materials.get("instrument_warning") or not allow_candidate:
+                st.warning(materials["verdict"])
+            else:
+                st.info(materials["verdict"])
             col1, col2 = st.columns([1, 2])
-            
             with col1:
-                # Score visual
-                st.plotly_chart(create_score_gauge(global_score), use_container_width=True)
-            
+                st.plotly_chart(create_score_gauge(1.0 - nos["nos"], "RAREZA  (1-NOS)"), use_container_width=True)
+                st.metric("NOS MORFOLOGICO", f"{nos['nos']:.2f}")
+                st.caption(f"nearest= {nos['nearest_class']}")
             with col2:
-                # Detalles
-                st.markdown("### 📈 Métricas Principales")
-                
-                score_pct = global_score * 100
-                if score_pct >= 70:
-                    level = "🔴 ALTA"
-                    color_class = "score-high"
-                elif score_pct >= 40:
-                    level = "🟡 MEDIA"
-                    color_class = "score-medium"
-                else:
-                    level = "🟢 BAJA"
-                    color_class = "score-low"
-                
-                st.markdown(f'''
-                <div class="score-box {color_class}">
-                    {score_pct:.1f}%<br>
-                    <span style="font-size: 1.2rem;">{level}</span>
-                </div>
-                ''', unsafe_allow_html=True)
-                
-                # Significancia
-                st.markdown(f"**Significancia estadística:** p = {mc_results['p_value']:.4f} {mc_results['stars']}")
-                
-                if mc_results['is_significant']:
-                    st.success("✅ Anomalía estadísticamente significativa")
-                else:
-                    st.info("ℹ️ Dentro de rangos normales")
-                
-                # Generar y mostrar informe automático (Resumen ejecutivo, hallazgos, advertencias, conclusión)
+                st.markdown(f"`FAMILIA`  {materials['dominant_label']}")
+                st.markdown(f"`LAB`      {materials['lab_analog']}")
+                st.markdown(f"`CIELO`    {materials['sky_analog']}")
+                st.markdown(f"`NEXT`     {materials['followup']}")
+                st.caption(f"p={mc_results['p_value']:.3f} {mc_results['stars']}  z={float(mc_results.get('z_score') or 0):.2f}  n={mc_results['n_simulations']}")
+                fam = materials["family_scores"]
+                figb = px.bar(x=list(fam.keys()), y=list(fam.values()), labels={"x": "familia", "y": "peso"}, title="MEZCLA")
+                figb.update_traces(marker_color=PHOSPHOR)
+                st.plotly_chart(_crt_layout(figb), use_container_width=True)
+            st.markdown("## `MIR HANDOFF  ->  spectral-identifier-v1`")
+            spec_file = st.file_uploader("OPCIONAL: CSV espectro de la MISMA region  [x,y]", type=["csv", "txt"], key="mir_csv")
+            spectrum_block = {"status": "missing", "kind": None, "xy": None, "notes": "Sin espectro MIR/FTIR/Raman de la region."}
+            if spec_file is not None:
                 try:
-                    results_for_report = {
-                        'timestamp': datetime.now().isoformat(),
-                        'filename': metadata.get('filename'),
-                        'mode': mode,
-                        'global_score': global_score,
-                        'monte_carlo': mc_results,
-                        'plugin_results': plugin_results
-                    }
-                    report_text = generate_report(results_for_report)
-                    with st.expander('📝 Informe automático (Resumen)'):
-                        st.markdown(report_text)
-                except Exception as e:
-                    st.warning(f"No se pudo generar el informe automático: {e}")
-            
-            # Resultados por plugin
-            st.markdown("---")
-            st.markdown("## 🔬 Resultados por Plugin")
-            
-            tabs = st.tabs([name.replace('_', ' ').title() for name in active_plugins])
-            
+                    spectrum_block = parse_spectrum_csv(spec_file)
+                    st.success(f"SPECTRUM.OK  {spectrum_block['notes']}")
+                except Exception as exc:
+                    st.error(f"SPECTRUM.ERR  {exc}")
+            card = build_candidate(
+                filename=metadata["filename"],
+                plugin_results=plugin_results,
+                materials=materials,
+                provenance=prov,
+                nos=nos,
+                monte_carlo=mc_results,
+                metadata=metadata,
+                source_url=source_url,
+            )
+            card["spectrum"] = spectrum_block
+            card["spectral_identifier_handoff"] = {
+                "target": "WilmerGaspar/spectral-identifier-v1",
+                "endpoint": "/api/identify/json",
+                "ready": spectrum_block.get("status") == "loaded",
+                "reason": "Listo para POST del xy a la libreria MIR/FTIR." if spectrum_block.get("status") == "loaded" else "Sin xy espectral no hay identificacion de material.",
+            }
+            json_txt = dumps_candidate(card)
+            st.download_button("DUMP CANDIDATE.JSON", data=json_txt, file_name=f"cms80_{metadata['filename']}.json", mime="application/json", use_container_width=True)
+            with st.expander("VIEW JSON"):
+                st.code(json_txt, language="json")
+            payload = {
+                "timestamp": datetime.now().isoformat(),
+                "filename": metadata.get("filename"),
+                "mode": mode,
+                "global_score": global_score,
+                "monte_carlo": mc_results,
+                "plugin_results": plugin_results,
+                "materials": materials,
+            }
+            with st.expander("INFORME"):
+                st.markdown(generate_report(payload))
+            st.markdown("## `CHANNELS`")
+            tabs = st.tabs([name.replace("_", " ").upper() for name in active_plugins])
             for i, plugin_name in enumerate(active_plugins):
                 with tabs[i]:
-                    if plugin_name in plugin_results:
-                        result = plugin_results[plugin_name]
-                        
-                        # Crear columnas para métricas
-                        metric_cols = st.columns(3)
-                        
-                        # Mostrar métricas clave según el plugin
-                        if plugin_name == 'fractal_base':
-                            with metric_cols[0]:
-                                st.metric("Dimensión D0", f"{result.get('d0', 0):.3f}")
-                            with metric_cols[1]:
-                                st.metric("Dimensión D1", f"{result.get('d1', 0):.3f}")
-                            with metric_cols[2]:
-                                st.metric("Dimensión D2", f"{result.get('d2', 0):.3f}")
-                            
-                            st.metric("Multifractalidad", f"{result.get('multifractality_index', 0):.3f}")
-                            st.metric("Complejidad", f"{result.get('complexity_score', 0):.3f}")
-                            
-                            # Gráfico log-log si hay datos
-                            if 'log_scales' in result and 'log_counts' in result:
-                                fig = px.scatter(
-                                    x=result['log_scales'], 
-                                    y=result['log_counts'],
-                                    title="Dimensión Fractal (Log-Log)",
-                                    labels={'x': 'log(ε)', 'y': 'log(N)'}
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-                        
-                        elif plugin_name == 'kolmogorov_1941':
-                            with metric_cols[0]:
-                                st.metric("Exponente β", f"{result.get('beta', 0):.3f}")
-                            with metric_cols[1]:
-                                st.metric("Intermittencia", f"{result.get('intermittency_factor', 0):.3f}")
-                            with metric_cols[2]:
-                                st.metric("Intensidad", f"{result.get('turbulence_intensity', 0):.3f}")
-                            
-                            # Gráfico espectro
-                            if 'k_values' in result and 'spectrum' in result:
-                                fig = px.line(
-                                    x=result['k_values'][:50], 
-                                    y=result['spectrum'][:50],
-                                    title="Espectro de Potencias",
-                                    labels={'x': 'k (número de onda)', 'y': 'E(k)'}
-                                )
-                                fig.update_yaxes(type="log")
-                                fig.update_xaxes(type="log")
-                                st.plotly_chart(fig, use_container_width=True)
-                        
-                        elif plugin_name == 'lyapunov_stability':
-                            with metric_cols[0]:
-                                st.metric("Max Lyapunov", f"{result.get('max_lyapunov', 0):.3f}")
-                            with metric_cols[1]:
-                                st.metric("Caótico", "Sí" if result.get('is_chaotic', False) else "No")
-                            with metric_cols[2]:
-                                st.metric("Entropía KS", f"{result.get('ks_entropy', 0):.3f}")
-                            
-                            st.info(f"**Tipo:** {result.get('dynamics_type', 'Desconocido')}")
-                        
-                        elif plugin_name == 'persistent_homology':
-                            with metric_cols[0]:
-                                st.metric("Betti 0", result.get('betti_0', 0))
-                            with metric_cols[1]:
-                                st.metric("Betti 1", result.get('betti_1', 0))
-                            with metric_cols[2]:
-                                st.metric("Entropía Topológica", f"{result.get('topological_entropy', 0):.3f}")
-                        
-                        elif plugin_name == 'renormalization_group':
-                            with metric_cols[0]:
-                                st.metric("Longitud Corr.", f"{result.get('correlation_length', 0):.1f}")
-                            with metric_cols[1]:
-                                st.metric("Crítico", "Sí" if result.get('is_critical', False) else "No")
-                            with metric_cols[2]:
-                                st.metric("Score", f"{result.get('criticality_score', 0):.3f}")
-                            
-                            st.info(f"**Clase:** {result.get('universality_class', 'Desconocida')}")
-            
-            # Descargar resultados
-            st.markdown("---")
-            st.markdown("## 💾 Descargar Resultados")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # JSON
-                import json
-                results_json = json.dumps({
-                    'timestamp': datetime.now().isoformat(),
-                    'filename': metadata['filename'],
-                    'mode': mode,
-                    'global_score': global_score,
-                    'monte_carlo': mc_results,
-                    'plugin_results': plugin_results,
-                    'report': locals().get('report_text', '')
-                }, indent=2, default=str)
-                
-                st.download_button(
-                    label="📥 Descargar JSON",
-                    data=results_json,
-                    file_name=f"results_{metadata['filename']}.json",
-                    mime="application/json"
-                )
-            
-            with col2:
-                if generate_pdf:
-                    st.info("📄 La generación de PDF se realiza en la versión de escritorio")
-                    st.markdown("Para obtener PDFs profesionales, descarga la versión completa")
-
-else:
-    # Pantalla inicial
-    st.markdown("---")
-    st.markdown("### 👋 Bienvenido a Anomaly Detector Web")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        #### 🔬 Plugins Matemáticos
-        - Dimensión fractal
-        - Turbulencia
-        - Caos y estabilidad
-        - Topología
-        - Criticalidad
-        """)
-    
-    with col2:
-        st.markdown("""
-        #### 📊 Análisis
-        - Score de anomalía
-        - Validación Monte Carlo
-        - Gráficos interactivos
-        - Resultados en tiempo real
-        """)
-    
-    with col3:
-        st.markdown("""
-        #### 🚀 Formatos
-        - JPG, PNG, TIFF
-        - FITS (Hubble/JWST)
-        - Metadatos astronómicos
-        - Sin instalación
-        """)
-    
-    st.info("💡 **Para comenzar:** Arrastra o selecciona una imagen arriba ↑")
-    
-    # Ejemplo
-    st.markdown("---")
-    st.markdown("### 📝 Ejemplo de Uso")
-    st.code("""
-1. Selecciona una imagen (JPG, PNG o FITS)
-2. Elige el modo de análisis (Explorer/Balanced/Conservative)
-3. Activa los plugins que necesites
-4. Click en "Iniciar Análisis"
-5. Revisa los resultados y descarga el JSON
-    """)
+                    result = plugin_results.get(plugin_name, {})
+                    if plugin_name == "fractal_base":
+                        a, b, c = st.columns(3)
+                        a.metric("D0", f"{result.get('d0', 0):.3f}")
+                        b.metric("D1", f"{result.get('d1', 0):.3f}")
+                        c.metric("D2", f"{result.get('d2', 0):.3f}")
+                    elif plugin_name == "kolmogorov_1941":
+                        a, b, c = st.columns(3)
+                        a.metric("BETA", f"{result.get('beta', 0):.3f}")
+                        b.metric("R2", f"{result.get('r_squared', 0):.3f}")
+                        c.metric("INTER", f"{result.get('intermittency_factor', 0):.3f}")
+                    elif plugin_name == "periodicity":
+                        a, b, c = st.columns(3)
+                        a.metric("SCORE", f"{result.get('periodicity_score', 0):.3f}")
+                        b.metric("PEAKS", f"{result.get('n_significant_peaks', 0)}")
+                        c.metric("LATTICE", str(result.get("lattice_hint", "-")))
+                        if result.get("likely_instrument_artifact"):
+                            st.warning(result.get("note", "ARTIFACT?"))
+                    elif plugin_name == "lyapunov_stability":
+                        st.metric("LAMBDA", f"{result.get('max_lyapunov', 0):.4f}")
+                    elif plugin_name == "persistent_homology":
+                        a, b = st.columns(2)
+                        a.metric("B0", f"{result.get('betti_0', 0)}")
+                        b.metric("B1", f"{result.get('betti_1', 0)}")
+                    elif plugin_name == "renormalization_group":
+                        st.metric("XI", f"{result.get('correlation_length', 0):.2f}")
+                    elif plugin_name == "anisotropy":
+                        st.metric("ANISO", f"{result.get('anisotropy_index', 0):.3f}")
+                    elif plugin_name == "entropy":
+                        st.metric("H", f"{result.get('shannon_entropy_bits', 0):.3f}")
+                    else:
+                        st.json(result)

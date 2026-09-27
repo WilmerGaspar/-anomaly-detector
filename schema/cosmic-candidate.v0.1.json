@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WilmerGaspar/-anomaly-detector/schema/cosmic-candidate.v0.1.json",
+  "title": "cosmic-candidate.v0.1",
+  "type": "object",
+  "required": ["schema", "source", "morphology", "spectrum"],
+  "properties": {
+    "schema": {"const": "cosmic-candidate.v0.1"},
+    "created_utc": {"type": "string"},
+    "source": {"type": "object", "required": ["filename", "is_fits"]},
+    "morphology": {"type": "object", "required": ["is_candidate"]},
+    "nos_morphological": {"type": "object"},
+    "structure_test": {"type": "object"},
+    "descriptors": {"type": "object"},
+    "quality": {"type": "object"},
+    "local_rarity": {"type": "object"},
+    "reproducibility": {"type": "object"},
+    "spectrum": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {"status": {"enum": ["missing", "attached", "identified", "mir_unknown"]}}
+    }
+  },
+  "additionalProperties": true
+}

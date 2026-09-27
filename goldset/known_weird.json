@@ -1,0 +1,13 @@
+{
+  "purpose": "Si CMS-80 marca estos como featureless, el NOS esta mal calibrado.",
+  "targets": [
+    {"name": "Hoag's Object", "mast_query": "Hoag Object", "missions": ["HST"], "expect_not_family": ["featureless"], "why": "Anillo + nucleo"},
+    {"name": "Red Square Nebula", "mast_query": "Red Square Nebula", "missions": ["HST"], "expect_not_family": ["featureless"], "why": "Simetria rara"},
+    {"name": "Southern Crab Nebula", "mast_query": "Hen 2-104", "missions": ["HST"], "expect_not_family": ["featureless"], "why": "Rejilla bipolar"},
+    {"name": "Crab Nebula", "mast_query": "Crab Nebula", "missions": ["HST", "JWST"], "expect_not_family": ["featureless"], "why": "Control positivo"},
+    {"name": "NGC 7023", "mast_query": "NGC 7023", "missions": ["HST", "JWST"], "expect_not_family": ["featureless"], "why": "Polvo estructurado"}
+  ],
+  "anti_targets": [
+    {"name": "NIRSpec uncal", "filename_contains": "nrs1_uncal", "expect_product_level": "detector"}
+  ]
+}

@@ -1,8 +1,5 @@
-"""Score global, nulo de fase y FDR Benjamini-Hochberg."""
+"""Score global, nulo de fase, FDR y nulos adaptativos."""
 from __future__ import annotations
-
-from typing import Callable, Dict, List, Optional, Tuple
-
 import numpy as np
 
 FEATURE_GETTERS = {
@@ -16,7 +13,6 @@ FEATURE_GETTERS = {
     "entropy": lambda r: float(np.clip(float(r.get("mutual_information_approx", 0.0)) / 4.0, 0.0, 1.0)),
 }
 
-
 def extract_feature_vector(plugin_results):
     names, vals = [], []
     for key, getter in FEATURE_GETTERS.items():
@@ -26,22 +22,16 @@ def extract_feature_vector(plugin_results):
             v = float(getter(plugin_results[key]))
         except (TypeError, ValueError):
             continue
-        if not np.isfinite(v):
-            continue
-        names.append(key)
-        vals.append(v)
+        if np.isfinite(v):
+            names.append(key); vals.append(v)
     return names, np.array(vals, dtype=float)
-
 
 def compute_global_score(plugin_results, mode="balanced"):
     _, vals = extract_feature_vector(plugin_results)
     score = 0.5 if len(vals) == 0 else float(np.clip(np.mean(np.clip(vals, 0.0, 1.0)), 0.0, 1.0))
-    if mode == "explorer":
-        score = min(score * 1.15, 1.0)
-    elif mode == "conservative":
-        score = score * 0.85
+    if mode == "explorer": score = min(score * 1.15, 1.0)
+    elif mode == "conservative": score = score * 0.85
     return float(np.clip(score, 0.0, 1.0))
-
 
 def phase_randomized_surrogate(image, rng):
     img = np.asarray(image, dtype=np.float64)
@@ -53,7 +43,6 @@ def phase_randomized_surrogate(image, rng):
     if surr.std() > 0 and img.std() > 0:
         surr = (surr - surr.mean()) / surr.std() * img.std() + img.mean()
     return np.clip(surr, float(img.min()), float(img.max()))
-
 
 def downsample_for_null(image, max_side=96):
     h, w = image.shape[:2]
@@ -67,7 +56,6 @@ def downsample_for_null(image, max_side=96):
     except Exception:
         step = max(1, side // max_side)
         return image[::step, ::step]
-
 
 def surrogate_null_test(image, observed_score, analyze_fn, n_simulations=40, seed=None):
     rng = np.random.default_rng(seed)
@@ -88,7 +76,6 @@ def surrogate_null_test(image, observed_score, analyze_fn, n_simulations=40, see
     stars = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else "ns"
     return {"p_value": p_value, "stars": stars, "is_significant": p_value < 0.05, "null_mean": null_mean, "null_std": null_std, "n_simulations": int(len(null)), "method": "phase-randomized surrogates (espectro conservado)", "z_score": float(z), "null_scores": null.tolist()}
 
-
 def cheap_score_from_image(image):
     img = np.asarray(image, dtype=np.float64)
     if img.ndim > 2:
@@ -100,14 +87,11 @@ def cheap_score_from_image(image):
     masses = [float(img[i:i+bs, j:j+bs].sum()) for i in range(0, img.shape[0], bs) for j in range(0, img.shape[1], bs)]
     m = np.array(masses)
     lac = float(np.clip((m.var() / ((m.mean() ** 2) + 1e-12)) / 4.0, 0.0, 1.0)) if m.size else 0.0
-    inc = np.diff(img, axis=1).ravel()
-    inc = inc - inc.mean()
-    m2 = np.mean(inc ** 2)
-    m4 = np.mean(inc ** 4)
+    inc = np.diff(img, axis=1).ravel(); inc = inc - inc.mean()
+    m2 = np.mean(inc ** 2); m4 = np.mean(inc ** 4)
     flat = m4 / (m2 ** 2) if m2 > 1e-18 else 3.0
     inter = float(np.clip((flat - 3.0) / 6.0, 0.0, 1.0))
     return float(np.clip(0.4 * aniso + 0.3 * lac + 0.3 * inter, 0.0, 1.0))
-
 
 def benjamini_hochberg(p_values, alpha=0.05):
     p = np.asarray(p_values, dtype=float)
@@ -125,7 +109,6 @@ def benjamini_hochberg(p_values, alpha=0.05):
     rejected = np.zeros(m, dtype=bool)
     rejected[order[: k_max + 1]] = True
     return rejected, float(ranked[k_max])
-
 
 def _cheap_metrics(image):
     img = np.asarray(image, dtype=np.float64)
@@ -147,7 +130,6 @@ def _cheap_metrics(image):
     ent = float(-np.sum(hist * np.log(hist + 1e-12)))
     return {"aniso": aniso, "flatness": float(flat), "entropy": ent, "energy_mean": float(energy.mean())}
 
-
 def cheap_descriptor_pvalues(image, n_simulations=24, seed=None):
     rng = np.random.default_rng(seed)
     small = downsample_for_null(image)
@@ -164,15 +146,21 @@ def cheap_descriptor_pvalues(image, n_simulations=24, seed=None):
     pmap = {}
     for k, val in obs.items():
         arr = np.array(nulls[k], dtype=float)
-        if arr.size == 0 or not np.isfinite(val):
-            pmap[k] = 1.0
-        else:
-            pmap[k] = max(float(np.mean(arr >= val)), 1.0 / (arr.size + 1))
+        pmap[k] = 1.0 if arr.size == 0 or not np.isfinite(val) else max(float(np.mean(arr >= val)), 1.0 / (arr.size + 1))
     return pmap
-
 
 def fdr_decision(p_map, alpha=0.05):
     names = list(p_map.keys())
     rejected, p_crit = benjamini_hochberg([p_map[k] for k in names], alpha=alpha)
     passed = [names[i] for i, ok in enumerate(rejected) if ok]
     return {"method": "benjamini-hochberg", "alpha": alpha, "p_values": p_map, "p_critical": p_crit, "passed_descriptors": passed, "n_tested": len(names), "n_passed": len(passed), "fdr_pass": bool(len(passed) > 0)}
+
+def adaptive_surrogate_null_test(image, observed_score, analyze_fn, n_start=24, n_expand=80, p_lo=0.04, p_hi=0.20, seed=None):
+    first = surrogate_null_test(image, observed_score, analyze_fn, n_simulations=n_start, seed=seed)
+    first["adaptive"] = {"started_at": n_start, "expanded": False}
+    p = float(first.get("p_value") or 1.0)
+    if p_lo <= p <= p_hi:
+        second = surrogate_null_test(image, observed_score, analyze_fn, n_simulations=n_expand, seed=seed)
+        second["adaptive"] = {"started_at": n_start, "expanded": True, "expanded_to": n_expand, "p_first": p}
+        return second
+    return first

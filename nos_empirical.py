@@ -1,9 +1,9 @@
-"""NOS v1 IsolationForest. Fibonacci fuera del vector. Sin nos_combined publico."""
+"""NOS v1 IsolationForest. Sin Fibonacci ni entropy en el vector."""
 from __future__ import annotations
 from pathlib import Path
 import numpy as np
 
-DESCRIPTOR_KEYS = ("fractal_d2", "lacunarity", "beta", "anisotropy", "entropy", "euler")
+DESCRIPTOR_KEYS = ("fractal_d2", "lacunarity", "beta", "anisotropy", "euler")
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "nos_models.joblib"
 GLOBAL_HPARAMS = {"n_estimators": 200, "contamination": 0.02, "max_samples": 256, "max_features": 1.0, "random_state": 42, "bootstrap": False}
 TILE_HPARAMS = {"n_estimators": 120, "contamination": 0.08, "max_samples": "auto", "random_state": 42}
@@ -28,7 +28,6 @@ def vectorize(plugin_results):
         g("fractal_base", "lacunarity", default=0.5),
         g("kolmogorov_1941", "beta", default=2.0),
         g("anisotropy", "anisotropy_index"),
-        g("entropy", "normalized_entropy", default=0.2),
         g("persistent_homology", "euler_characteristic"),
     ], dtype=float)
 
@@ -36,7 +35,7 @@ def synthetic_sky_corpus(n=400, seed=42):
     rng = np.random.default_rng(seed)
     X = np.column_stack([
         rng.normal(1.85, 0.18, n), rng.normal(0.45, 0.18, n), rng.normal(2.20, 0.55, n),
-        rng.beta(2.0, 6.0, n), rng.beta(4.0, 3.0, n), rng.normal(0.0, 8.0, n),
+        rng.beta(2.0, 6.0, n), rng.normal(0.0, 8.0, n),
     ])
     X[:, 0] = np.clip(X[:, 0], 1.1, 2.2)
     X[:, 1] = np.clip(X[:, 1], 0.05, 1.5)
@@ -94,13 +93,7 @@ def nos_score(models, v):
     x = np.asarray(v, dtype=float).reshape(1, -1)
     s_iso = float(-iso.decision_function(x)[0])
     pred = int(iso.predict(x)[0])
-    out = {
-        "nos_isoforest": s_iso,
-        "isoforest_outlier": pred == -1,
-        "isoforest_predict": pred,
-        "hparams": GLOBAL_HPARAMS,
-        "vector_keys": list(DESCRIPTOR_KEYS),
-    }
+    out = {"nos_isoforest": s_iso, "isoforest_outlier": pred == -1, "isoforest_predict": pred, "hparams": GLOBAL_HPARAMS, "vector_keys": list(DESCRIPTOR_KEYS)}
     if rob is not None:
         out["nos_mahalanobis"] = float(-rob.decision_function(x)[0])
     return out
@@ -112,7 +105,7 @@ def score_with_isoforest(plugin_results):
     emp["background"] = source
     emp["version"] = "v1_isoforest"
     emp["vector"] = vectorize(plugin_results).tolist()
-    emp["note"] = "iso y mahalanobis por separado. Fibonacci fuera del vector. Fondo=%s." % source
+    emp["note"] = "vector sin fibonacci ni entropy. iso y mahalanobis separados. fondo=%s" % source
     return emp
 
 def morphological_nos_v1(plugin_results, prior_fallback=None):

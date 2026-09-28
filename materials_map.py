@@ -1,15 +1,23 @@
-"""Mapa de analogos: fisica de materiales <-> morfologia en el cielo."""
+"""Mapa de analogos + estado honesto del candidato."""
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple
 
 FAMILIES = {
-    "aggregate": {"label": "Agregado fractal", "lab_analog": "Hollin, dust aggregates, aerogeles, DLA, flocs coloidales", "sky_analog": "Polvo interestelar / nubes con estructura autosimilar", "followup": "Extincion + hielo/silicatos en IR"},
-    "cascade": {"label": "Cascada turbulenta", "lab_analog": "Medios intermitentes", "sky_analog": "ISM turbulento proyectado", "followup": "beta en varios filtros; cubo de velocidad"},
-    "filament": {"label": "Red filamentaria", "lab_analog": "Polimeros, textura, nanowires", "sky_analog": "Filamentos moleculares", "followup": "Polarimetria"},
+    "aggregate": {"label": "Agregado fractal", "lab_analog": "Hollin, dust aggregates, aerogeles", "sky_analog": "Polvo / nubes autosimilares", "followup": "Extincion + hielo/silicatos en IR"},
+    "cascade": {"label": "Cascada turbulenta", "lab_analog": "Medios intermitentes", "sky_analog": "ISM turbulento proyectado", "followup": "beta en varios filtros"},
+    "filament": {"label": "Red filamentaria", "lab_analog": "Polimeros, textura", "sky_analog": "Filamentos moleculares", "followup": "Polarimetria"},
     "lattice": {"label": "Orden periodico", "lab_analog": "Cristal / cuasicristal", "sky_analog": "Casi siempre artefacto", "followup": "Descartar fringing"},
     "compact": {"label": "Condensado compacto", "lab_analog": "Grano, nucleacion", "sky_analog": "Estrella o nudo denso", "followup": "Fotometria multi-banda"},
-    "critical": {"label": "Casi critico / scale-free", "lab_analog": "Percolacion, opalescencia critica", "sky_analog": "Campos autosimilares", "followup": "Coarse-grain 2x y 4x"},
+    "critical": {"label": "Casi critico / scale-free", "lab_analog": "Percolacion", "sky_analog": "Campos autosimilares", "followup": "Coarse-grain 2x y 4x"},
     "featureless": {"label": "Sin organizacion extra", "lab_analog": "Vidrio / ruido", "sky_analog": "Fondo", "followup": "No es candidato por morfologia"},
+    "mixed": {"label": "Mezcla (empate)", "lab_analog": "No asignar un solo analogo", "sky_analog": "Campo con varias familias a la vez", "followup": "No titular una familia"},
+}
+
+STATE_TEXT = {
+    "reject": "Rechazado para descubrimiento: procedencia insuficiente.",
+    "exploratory_only": "Producto de detector (uncal/rate). Exploratorio, no ciencia usable.",
+    "known_or_weak": "Campo usable pero FDR no deja descriptores. Estructura tipica o test barato insuficiente. No es candidato.",
+    "morph_interesting": "FDR deja al menos un descriptor barato. Interes morfologico. Sin espectro no hay identificacion.",
+    "needs_spectrum": "Morfologia sobrevive FDR. Siguiente paso: x1d de la MISMA region.",
 }
 
 def _f(d, *keys, default=0.0):
@@ -63,48 +71,60 @@ def family_scores(plugin_results, structure_z=0.0):
     total = sum(scores.values()) or 1.0
     return {k: v / total for k, v in scores.items()}
 
-def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None):
+def decide_state(provenance=None, fdr_pass=None, product_level=None, family_key="featureless"):
+    prov = provenance or {}
+    verdict = prov.get("verdict")
+    level = product_level or prov.get("product_level")
+    if verdict in ("reject_for_discovery", "reject") or prov.get("is_fits") is False:
+        return "reject"
+    if level == "detector" or verdict == "exploratory_only":
+        return "exploratory_only"
+    if fdr_pass is False:
+        return "known_or_weak"
+    if fdr_pass is True and family_key != "featureless":
+        return "needs_spectrum"
+    if fdr_pass is True:
+        return "morph_interesting"
+    return "known_or_weak"
+
+def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, provenance=None):
     scores = family_scores(plugin_results, structure_z)
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
     top_key, top_p = ranked[0]
     second_key, second_p = ranked[1]
+    margin = float(top_p - second_p)
+    mixed = margin < 0.05
+    if mixed:
+        top_key = "mixed"
     artifact = bool(plugin_results.get("periodicity", {}).get("likely_instrument_artifact", False))
     per_score = _f(plugin_results, "periodicity", "periodicity_score")
-    phase_null_empty = p_value >= 0.1 and structure_z < 1.5
     n_sig = int(plugin_results.get("periodicity", {}).get("n_significant_peaks") or 0)
-    lattice_evidence = (top_key == "lattice" and per_score >= 0.35) or (per_score >= 0.50 and n_sig >= 2)
+    lattice_evidence = (not mixed and top_key == "lattice" and per_score >= 0.35) or (per_score >= 0.50 and n_sig >= 2)
     if artifact and lattice_evidence:
-        top_key = "lattice"; candidate = False
-        verdict = "Periodicidad alineada al detector. Artefacto hasta demostrar lo contrario."
-    elif lattice_evidence and per_score >= 0.40:
-        top_key = "lattice"; candidate = True
-        verdict = "Firma periodica en |FFT|. Descartar instrumento, luego espectro."
-    elif phase_null_empty:
-        top_key = "featureless"; candidate = False
-        verdict = "No hay organizacion extra frente a un campo con el mismo espectro."
-    elif structure_z >= 2.5:
-        candidate = True
-        verdict = "Estructura coherente. Familia: %s. Candidato morfologico, no identificacion." % FAMILIES[top_key]["label"]
-    else:
-        candidate = top_p > 0.28 and structure_z >= 1.5
-        verdict = "Senal moderada. Mezcla %s + %s." % (FAMILIES[top_key]["label"], FAMILIES[second_key]["label"])
-    if fdr_pass is False:
-        candidate = False
-        verdict = "FDR no deja ningun descriptor. " + verdict
-    elif fdr_pass is True and not candidate and structure_z >= 1.2:
-        candidate = True
-        verdict = "FDR deja al menos un descriptor. " + verdict
-    meta = FAMILIES[top_key]
+        top_key = "lattice"
+    state = decide_state(provenance, fdr_pass, family_key=top_key if top_key != "mixed" else ranked[0][0])
+    is_candidate = state in ("needs_spectrum", "morph_interesting")
+    if artifact and lattice_evidence:
+        is_candidate = False
+        state = "known_or_weak"
+    meta = FAMILIES.get(top_key, FAMILIES["mixed"])
+    verdict = STATE_TEXT[state]
+    if mixed:
+        verdict = "Empate de familias (%s vs %s, margen=%.3f). " % (ranked[0][0], second_key, margin) + verdict
     return {
         "dominant_family": top_key,
         "dominant_label": meta["label"],
-        "dominant_weight": float(top_p),
+        "dominant_weight": float(top_p if not mixed else ranked[0][1]),
         "family_scores": scores,
+        "family_margin": margin,
+        "family_tie": mixed,
+        "tied_families": [ranked[0][0], second_key, ranked[2][0]] if mixed else [top_key],
         "lab_analog": meta["lab_analog"],
         "sky_analog": meta["sky_analog"],
         "followup": meta["followup"],
         "instrument_warning": artifact,
-        "is_candidate": candidate,
+        "is_candidate": is_candidate,
+        "state": state,
         "verdict": verdict,
         "fdr_pass": fdr_pass,
     }

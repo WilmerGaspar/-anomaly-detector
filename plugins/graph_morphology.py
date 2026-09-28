@@ -1,8 +1,4 @@
-"""Teoria de grafos sobre mosaicos del campo.
-
-Nodos = tiles. Arista si son vecinos y el contraste es bajo (misma fase).
-Metricas: componentes, clustering local, gap espectral del Laplaciano.
-"""
+"""Grafo de tiles. p=not_tested. gap 0 = componentes desconectados."""
 from __future__ import annotations
 import numpy as np
 
@@ -15,7 +11,7 @@ def analyze_graph(image, n=8):
     means = np.zeros((n, n))
     for i in range(n):
         for j in range(n):
-            patch = img[i*th:(i+1)*th, j*tw:(j+1)*tw]
+            patch = img[i * th:(i + 1) * th, j * tw:(j + 1) * tw]
             means[i, j] = float(np.nanmean(patch)) if patch.size else 0.0
     nodes = n * n
     adj = np.zeros((nodes, nodes), dtype=float)
@@ -31,11 +27,9 @@ def analyze_graph(image, n=8):
                 d = abs(means[i, j] - means[ii, jj])
                 if d <= thr:
                     a, b = idx(i, j), idx(ii, jj)
-                    wgt = 1.0 - d / (thr + 1e-9)
-                    adj[a, b] = adj[b, a] = wgt
+                    adj[a, b] = adj[b, a] = 1.0 - d / (thr + 1e-9)
     deg = adj.sum(axis=1)
     n_edges = int((adj > 0).sum() // 2)
-    # componentes via BFS
     seen = np.zeros(nodes, dtype=bool)
     comps = 0
     largest = 0
@@ -54,7 +48,6 @@ def analyze_graph(image, n=8):
                     seen[v] = True
                     stack.append(int(v))
         largest = max(largest, size)
-    # clustering medio (triangulos / posibles)
     clust = []
     for u in range(nodes):
         nbr = np.where(adj[u] > 0)[0]
@@ -68,14 +61,17 @@ def analyze_graph(image, n=8):
                     links += 1
         clust.append(2.0 * links / (k * (k - 1)))
     clustering = float(np.mean(clust)) if clust else 0.0
-    # gap espectral
     gap = float("nan")
+    gap_note = "sin espectro"
     try:
-        d = np.diag(deg)
-        L = d - adj
+        L = np.diag(deg) - adj
         eig = np.sort(np.linalg.eigvalsh(L))
         if len(eig) >= 2:
             gap = float(eig[1])
+            if comps > 1 and abs(gap) < 1e-8:
+                gap_note = "gap 0 esperado: %d componentes desconectados" % comps
+            else:
+                gap_note = "lambda2 del laplaciano"
     except Exception:
         pass
     return {
@@ -86,7 +82,8 @@ def analyze_graph(image, n=8):
         "mean_degree": float(deg.mean()) if nodes else 0.0,
         "clustering": clustering,
         "spectral_gap": gap,
+        "spectral_gap_note": gap_note,
+        "p": "not_tested",
         "threshold": thr,
-        "adjacency": adj.tolist(),
-        "note": "Pocas componentes + clustering alto = dominios cohesivos (filamento/agregado). Muchas componentes = campo fragmentado.",
+        "note": "Pocas componentes + clustering alto = dominios cohesivos. gap=0 si el grafo no es conexo.",
     }

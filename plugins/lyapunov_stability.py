@@ -1,73 +1,55 @@
-"""
-Plugin LyapunovStability adaptado para web.
-"""
+"""Proxy 1D tipo Rosenstein sobre el perfil medio. No es dinamica 2D."""
+from __future__ import annotations
 import numpy as np
-from scipy.spatial.distance import cdist
-from typing import Dict
-
-def safe_log(x, default=0.0):
-    if x <= 0 or np.isnan(x) or np.isinf(x):
-        return default
-    result = np.log(x)
-    if np.isinf(result) or np.isnan(result):
-        return default
-    return result
 
 class LyapunovStability:
-    def __init__(self, max_iterations=1000, embedding_dim=3):
+    def __init__(self, max_iterations=200, embedding_dim=3):
         self.max_iterations = max_iterations
         self.embedding_dim = embedding_dim
-    
+
     def analyze(self, image):
-        trajectory = self._phase_space_reconstruction(image)
-        
-        if len(trajectory) < 10:
-            return self._empty_results()
-        
-        max_lyapunov = float(np.random.uniform(-0.5, 0.8))
-        is_chaotic = max_lyapunov > 0.01
-        
-        dynamics_type = "Caótico fuerte" if max_lyapunov > 0.1 else \
-                       ("Caótico débil" if max_lyapunov > 0.01 else \
-                       ("Cíclico" if max_lyapunov > -0.01 else "Estable"))
-        
+        img = np.asarray(image, dtype=np.float64)
+        if img.ndim > 2:
+            img = img.mean(axis=2)
+        series = np.nanmean(img, axis=1)
+        series = np.nan_to_num(series - np.nanmean(series), nan=0.0)
+        if series.size < 30 or series.std() == 0:
+            return self._pack(float("nan"), "not_tested")
+        dim = self.embedding_dim
+        n = len(series) - dim
+        if n < 20:
+            return self._pack(float("nan"), "not_tested")
+        traj = np.column_stack([series[i:i + n] for i in range(dim)])
+        divergences = []
+        steps = min(8, n // 4)
+        for i in range(0, n - steps, max(1, n // 40)):
+            d = np.linalg.norm(traj - traj[i], axis=1)
+            d[i] = np.inf
+            j = int(np.argmin(d))
+            if not np.isfinite(d[j]) or d[j] <= 0:
+                continue
+            for k in range(1, steps):
+                if i + k >= n or j + k >= n:
+                    break
+                sep = float(np.linalg.norm(traj[i + k] - traj[j + k]))
+                if sep > 0:
+                    divergences.append((k, np.log(sep / (d[j] + 1e-12))))
+        if len(divergences) < 8:
+            return self._pack(float("nan"), "not_tested")
+        by = {}
+        for k, val in divergences:
+            by.setdefault(k, []).append(val)
+        ks = sorted(by)
+        ys = [float(np.mean(by[k])) for k in ks]
+        if len(ks) < 3:
+            return self._pack(float("nan"), "not_tested")
+        slope = float(np.polyfit(ks[: min(5, len(ks))], ys[: min(5, len(ys))], 1)[0])
+        return self._pack(slope, "not_tested")
+
+    def _pack(self, lam, p):
         return {
-            'max_lyapunov': float(np.clip(max_lyapunov, -5.0, 5.0)),
-            'is_chaotic': is_chaotic,
-            'chaos_strength': float(max(0, max_lyapunov)),
-            'ks_entropy': float(abs(max_lyapunov) * 2),
-            'kaplan_yorke_dim': float(np.random.uniform(1.0, 3.0)),
-            'dynamics_type': dynamics_type,
-            'recurrence_rate': float(np.random.uniform(0.1, 0.5)),
-            'determinism': float(np.random.uniform(0.5, 0.9)),
-            'stability_score': float(1.0 - max(0, max_lyapunov) / 2)
-        }
-    
-    def _phase_space_reconstruction(self, image):
-        h, w = image.shape
-        time_series = np.mean(image, axis=1)
-        
-        tau = 1
-        n_points = len(time_series) - (self.embedding_dim - 1) * tau
-        
-        if n_points < 10:
-            return np.column_stack([time_series[:-1], time_series[1:]])
-        
-        trajectory = np.zeros((n_points, self.embedding_dim))
-        for i in range(self.embedding_dim):
-            trajectory[:, i] = time_series[i * tau : i * tau + n_points]
-        
-        return trajectory
-    
-    def _empty_results(self):
-        return {
-            'max_lyapunov': 0.0,
-            'is_chaotic': False,
-            'chaos_strength': 0.0,
-            'ks_entropy': 0.0,
-            'kaplan_yorke_dim': 0.0,
-            'dynamics_type': 'Desconocido',
-            'recurrence_rate': 0.0,
-            'determinism': 0.0,
-            'stability_score': 1.0
+            "max_lyapunov": lam,
+            "dynamics_type": "proxy 1D exploratorio",
+            "p": p,
+            "note": "Rosenstein sobre el perfil fila-media. No implica caos del campo 2D.",
         }

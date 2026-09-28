@@ -1,4 +1,4 @@
-"""Cliente MAST para HST / JWST / Roman. Lista todos los FITS."""
+"""Cliente MAST: timeout, reintento y catalogo por mision."""
 from __future__ import annotations
 
 PREFERRED = ("i2d.fits", "drc.fits", "drz.fits", "x1d.fits", "s3d.fits", "cal.fits", "flt.fits", "sci.fits")
@@ -8,6 +8,22 @@ MISSION_ALIASES = {
     "ROMAN": {"ROMAN", "RST", "NGRST"},
     "HLSP": {"HLSP"},
 }
+TIMEOUT_SEC = 45
+
+CURATED = {
+    "HST": ["M16", "M51", "M42", "NGC 7023", "Crab Nebula", "Hoag Object", "Eta Carinae", "Helix Nebula", "M87", "NGC 1300", "SN 1987A", "HH 30"],
+    "JWST": ["NGC 7023", "M16", "Orion Nebula", "Stephan's Quintet", "SMACS 0723", "WASP-39", "NGC 3324", "Cartwheel Galaxy", "Jupiter", "Saturn", "Enceladus", "PDS 70"],
+    "ROMAN": ["LMC", "SMC", "Sagittarius A", "Andromeda", "M31", "COSMOS field"],
+    "HLSP": ["HUDF", "GOODS-S", "COSMOS", "CANDELS"],
+}
+
+def _obs():
+    from astroquery.mast import Observations
+    try:
+        Observations.TIMEOUT = TIMEOUT_SEC
+    except Exception:
+        pass
+    return Observations
 
 def _mission_ok(raw, selected):
     raw_u = (raw or "").upper()
@@ -33,9 +49,37 @@ def _hint(name):
         return "calibrado intermedio"
     return ""
 
-def search_observations(target, missions, radius_deg=0.12, limit=80):
-    from astroquery.mast import Observations
-    table = Observations.query_object(target.strip(), radius="%s deg" % radius_deg)
+def _row(rec, fallback_target=""):
+    jpeg = str(rec.get("jpegURL") or "")
+    if jpeg.startswith("/") and not jpeg.startswith("http"):
+        jpeg = "https://mast.stsci.edu" + jpeg
+    return {
+        "obsid": str(rec.get("obsid") or ""),
+        "obs_id": str(rec.get("obs_id") or ""),
+        "mission": str(rec.get("obs_collection") or rec.get("project") or ""),
+        "instrument": str(rec.get("instrument_name") or ""),
+        "filters": str(rec.get("filters") or ""),
+        "target": str(rec.get("target_name") or fallback_target),
+        "s_ra": rec.get("s_ra"),
+        "s_dec": rec.get("s_dec"),
+        "t_exptime": rec.get("t_exptime"),
+        "jpeg_url": jpeg if jpeg.startswith("http") else "",
+        "dataproduct_type": str(rec.get("dataproduct_type") or "").lower(),
+    }
+
+def search_observations(target, missions, radius_deg=0.12, limit=40):
+    Observations = _obs()
+    last = None
+    table = None
+    for _ in range(2):
+        try:
+            table = Observations.query_object(target.strip(), radius="%s deg" % radius_deg)
+            last = None
+            break
+        except Exception as exc:
+            last = exc
+    if last is not None:
+        raise RuntimeError("MAST timeout o red. Reintenta o carga un FITS local. (%s)" % last)
     if table is None or len(table) == 0:
         return []
     rows = []
@@ -46,39 +90,62 @@ def search_observations(target, missions, radius_deg=0.12, limit=80):
         dtype = str(rec.get("dataproduct_type") or "").lower()
         if dtype in {"timeseries", "catalog"}:
             continue
-        jpeg = str(rec.get("jpegURL") or "")
-        if jpeg.startswith("/") and not jpeg.startswith("http"):
-            jpeg = "https://mast.stsci.edu" + jpeg
-        rows.append({
-            "obsid": str(rec.get("obsid") or ""),
-            "obs_id": str(rec.get("obs_id") or ""),
-            "mission": mission,
-            "instrument": str(rec.get("instrument_name") or ""),
-            "filters": str(rec.get("filters") or ""),
-            "target": str(rec.get("target_name") or target),
-            "s_ra": rec.get("s_ra"),
-            "s_dec": rec.get("s_dec"),
-            "t_exptime": rec.get("t_exptime"),
-            "jpeg_url": jpeg if jpeg.startswith("http") else "",
-            "dataproduct_type": dtype,
-        })
+        rows.append(_row(rec, target))
         if len(rows) >= limit:
             break
     return rows
 
+def list_mission_targets(mission, limit=60):
+    """Lista curada + muestra MAST. No es el archivo completo de la mision."""
+    curated = [{"target": t, "source": "curated", "mission": mission} for t in CURATED.get(mission, [])]
+    Observations = _obs()
+    coll = {"HST": "HST", "JWST": "JWST", "ROMAN": "ROMAN", "HLSP": "HLSP"}.get(mission, mission)
+    extra = []
+    try:
+        table = Observations.query_criteria(obs_collection=coll, dataproduct_type=["image", "spectrum"])
+        seen = {t["target"].upper() for t in curated}
+        if table is not None:
+            for rec in table:
+                name = str(rec.get("target_name") or "").strip()
+                if not name or name.upper() in seen or name.upper() in {"UNKNOWN", "NONE", "N/A"}:
+                    continue
+                seen.add(name.upper())
+                extra.append({
+                    "target": name,
+                    "source": "mast",
+                    "mission": str(rec.get("obs_collection") or mission),
+                    "instrument": str(rec.get("instrument_name") or ""),
+                    "filters": str(rec.get("filters") or ""),
+                    "obsid": str(rec.get("obsid") or ""),
+                    "obs_id": str(rec.get("obs_id") or ""),
+                    "jpeg_url": _row(rec).get("jpeg_url"),
+                })
+                if len(extra) >= limit:
+                    break
+    except Exception as exc:
+        extra = [{"target": "(MAST no respondio: %s)" % exc, "source": "error", "mission": mission}]
+    return curated + extra
+
 def list_fits_products(obsid, max_mb=None):
-    from astroquery.mast import Observations
-    products = Observations.get_product_list(obsid)
+    Observations = _obs()
+    last = None
+    products = None
+    for _ in range(2):
+        try:
+            products = Observations.get_product_list(obsid)
+            last = None
+            break
+        except Exception as exc:
+            last = exc
+    if last is not None:
+        raise RuntimeError("MAST timeout al listar FITS. (%s)" % last)
     if products is None or len(products) == 0:
         return []
-    out = []
-    seen = set()
+    out, seen = [], set()
     for rec in products:
         name = str(rec.get("productFilename") or rec.get("filename") or "")
         low = name.lower()
-        if not low.endswith((".fits", ".fits.gz")):
-            continue
-        if name in seen:
+        if not low.endswith((".fits", ".fits.gz")) or name in seen:
             continue
         seen.add(name)
         size = rec.get("size")
@@ -88,7 +155,6 @@ def list_fits_products(obsid, max_mb=None):
             size_mb = None
         if max_mb is not None and size_mb is not None and size_mb > max_mb:
             continue
-        uri = str(rec.get("dataURI") or "")
         rank = 80
         for i, suf in enumerate(PREFERRED):
             if low.endswith(suf) or suf.replace(".fits", "") in low:
@@ -99,9 +165,9 @@ def list_fits_products(obsid, max_mb=None):
         out.append({
             "filename": name,
             "product_type": str(rec.get("productType") or ""),
-            "description": str(rec.get("description") or rec.get("productSubGroupDescription") or ""),
+            "description": str(rec.get("description") or ""),
             "size_mb": size_mb,
-            "uri": uri,
+            "uri": str(rec.get("dataURI") or ""),
             "rank": rank,
             "hint": _hint(name),
         })
@@ -109,7 +175,7 @@ def list_fits_products(obsid, max_mb=None):
     return out
 
 def download_product(uri, filename, max_mb=200.0):
-    from astroquery.mast import Observations
+    Observations = _obs()
     from pathlib import Path
     tmp = Path("/tmp/cms80_mast")
     tmp.mkdir(parents=True, exist_ok=True)

@@ -1,32 +1,26 @@
-"""Detector de razones tipo Fibonacci / numero aureo en escalas de la imagen.
-
-No afirma filotaxis cosmica. Mide si picos de FFT o anillos radiales
-se agrupan cerca de phi = (1+sqrt(5))/2 o de F_{n+1}/F_n.
-"""
+"""Detector de razones tipo Fibonacci. Reporta n_pairs_tested."""
 from __future__ import annotations
-
 import numpy as np
 
 PHI = 0.5 * (1.0 + 5.0 ** 0.5)
-FIB_RATIOS = (1.0, 1.5, 1.6180339887, 1.6666667, 2.0, 2.5, 2.6180339887)
+FIB_RATIOS = (1.6180339887, 2.6180339887)
 
-
-def _nearest_phi(ratio: float) -> tuple:
+def _nearest_phi(ratio):
     r = float(ratio)
     if r < 1.0:
         r = 1.0 / r if r > 0 else 0.0
     best = min(FIB_RATIOS, key=lambda t: abs(r - t))
     return best, abs(r - best)
 
-
 def analyze_fibonacci(image):
     img = np.asarray(image, dtype=np.float64)
     if img.ndim > 2:
         img = img.mean(axis=2)
+    empty = {"phi": PHI, "n_phi_pairs": 0, "n_pairs_tested": 0, "best_ratio": 0.0, "phi_error": 1.0, "fibonacci_score": 0.0, "radial_phi_hits": 0, "fft_phi_hits": 0, "note": "sin pares"}
     if img.size < 16:
-        return {"phi": PHI, "n_phi_pairs": 0, "best_ratio": 0.0, "phi_error": 1.0, "fibonacci_score": 0.0, "radial_phi_hits": 0, "fft_phi_hits": 0, "note": "imagen demasiado pequena"}
-    img = img - np.nanmean(img)
-    img = np.nan_to_num(img, nan=0.0)
+        empty["note"] = "imagen demasiado pequena"
+        return empty
+    img = np.nan_to_num(img - np.nanmean(img), nan=0.0)
     ny, nx = img.shape
     win = np.outer(np.hanning(ny), np.hanning(nx))
     spec = np.abs(np.fft.fftshift(np.fft.fft2(img * win)))
@@ -40,6 +34,7 @@ def analyze_fibonacci(image):
         ring = spec[(rr >= r - 0.5) & (rr < r + 0.5)]
         if ring.size:
             radial.append((r, float(ring.mean())))
+    tested = 0
     radial_phi = 0
     best_ratio = 0.0
     best_err = 1.0
@@ -53,9 +48,10 @@ def analyze_fibonacci(image):
             peaks = np.unique(np.round(peaks, 0))
             for i in range(len(peaks)):
                 for j in range(i + 1, len(peaks)):
+                    tested += 1
                     ratio = float(peaks[j] / peaks[i])
                     target, err = _nearest_phi(ratio)
-                    if err < 0.08 and 1.4 <= ratio <= 2.8:
+                    if err < 0.05 and 1.5 <= ratio <= 2.8:
                         radial_phi += 1
                         if err < best_err:
                             best_err = err
@@ -67,16 +63,18 @@ def analyze_fibonacci(image):
     freqs = np.unique(np.round(freqs[freqs > 2.0], 1))
     fft_phi = 0
     if freqs.size >= 2:
-        freqs = np.sort(freqs)[:24]
+        freqs = np.sort(freqs)[:16]
         for i in range(len(freqs)):
             for j in range(i + 1, len(freqs)):
+                tested += 1
                 ratio = float(freqs[j] / freqs[i])
                 target, err = _nearest_phi(ratio)
-                if err < 0.06 and 1.45 <= ratio <= 2.75:
+                if err < 0.04 and 1.52 <= ratio <= 2.75:
                     fft_phi += 1
                     if err < best_err:
                         best_err = err
                         best_ratio = ratio
     hits = radial_phi + fft_phi
-    score = float(min(1.0, 0.15 * hits + (0.0 if best_err >= 1 else max(0.0, 1.0 - best_err / 0.08) * 0.4)))
-    return {"phi": PHI, "n_phi_pairs": int(hits), "best_ratio": float(best_ratio), "phi_error": float(best_err if best_ratio else 1.0), "fibonacci_score": score, "radial_phi_hits": int(radial_phi), "fft_phi_hits": int(fft_phi), "note": "razones ~ phi en FFT/anillos; no implica filotaxis"}
+    rate = hits / tested if tested else 0.0
+    score = float(min(1.0, rate * 8.0 + (0.0 if best_err >= 1 else max(0.0, 1.0 - best_err / 0.05) * 0.2)))
+    return {"phi": PHI, "n_phi_pairs": int(hits), "n_pairs_tested": int(tested), "best_ratio": float(best_ratio), "phi_error": float(best_err if best_ratio else 1.0), "fibonacci_score": score, "radial_phi_hits": int(radial_phi), "fft_phi_hits": int(fft_phi), "note": "score = hits/tested; 1.5 ya no cuenta como phi"}

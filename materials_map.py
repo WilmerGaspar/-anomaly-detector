@@ -43,6 +43,18 @@ def _band(x, lo, hi):
     width = hi - lo
     return max(0.0, 1.0 - (lo - x) / width) if x < lo else max(0.0, 1.0 - (x - hi) / width)
 
+def instrument_warning_reason(plugin_results, metadata=None):
+    per = plugin_results.get("periodicity") or {}
+    reasons = []
+    if per.get("likely_instrument_artifact"):
+        reasons.append("picos FFT alineados al detector (n=%s, axis_frac=%s)" % (per.get("n_significant_peaks"), per.get("axis_aligned_fraction")))
+    filt = str((metadata or {}).get("filter") or "")
+    if "CLEAR" in filt.upper():
+        reasons.append("filtro ACS CLEAR — no es banda fotometrica estandar")
+    if not reasons:
+        return None
+    return "; ".join(reasons)
+
 def family_scores(plugin_results, structure_z=0.0):
     d0 = _f(plugin_results, "fractal_base", "d0", default=1.5)
     multi = _f(plugin_results, "fractal_base", "multifractality_index")
@@ -87,7 +99,7 @@ def decide_state(provenance=None, fdr_pass=None, product_level=None, family_key=
         return "morph_interesting"
     return "known_or_weak"
 
-def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, provenance=None):
+def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, provenance=None, metadata=None):
     scores = family_scores(plugin_results, structure_z)
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
     top_key, top_p = ranked[0]
@@ -111,6 +123,7 @@ def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, prove
     verdict = STATE_TEXT[state]
     if mixed:
         verdict = "Empate de familias (%s vs %s, margen=%.3f). " % (ranked[0][0], second_key, margin) + verdict
+    warn_reason = instrument_warning_reason(plugin_results, metadata)
     return {
         "dominant_family": top_key,
         "dominant_label": meta["label"],
@@ -122,7 +135,8 @@ def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, prove
         "lab_analog": meta["lab_analog"],
         "sky_analog": meta["sky_analog"],
         "followup": meta["followup"],
-        "instrument_warning": artifact,
+        "instrument_warning": artifact or bool(warn_reason),
+        "instrument_warning_reason": warn_reason,
         "is_candidate": is_candidate,
         "state": state,
         "verdict": verdict,

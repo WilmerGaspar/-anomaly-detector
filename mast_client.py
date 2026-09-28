@@ -9,6 +9,7 @@ MISSION_ALIASES = {
     "HLSP": {"HLSP"},
 }
 TIMEOUT_SEC = 45
+MAX_CLOUD_MB = 400.0
 
 CURATED = {
     "HST": ["M16", "M51", "M42", "NGC 7023", "Crab Nebula", "Hoag Object", "Eta Carinae", "Helix Nebula", "M87", "NGC 1300", "SN 1987A", "HH 30"],
@@ -33,8 +34,12 @@ def _mission_ok(raw, selected):
             return True
     return False
 
-def _hint(name):
+def _hint(name, size_mb=None):
     low = (name or "").lower()
+    if size_mb is not None and size_mb > MAX_CLOUD_MB:
+        return "demasiado grande para Cloud (>%s MB)" % int(MAX_CLOUD_MB)
+    if "skycell" in low or "all_drc" in low:
+        return "mosaic enorme — evita en Cloud"
     if any(s in low for s in ("i2d", "_drz", "_drc")):
         return "imagen calibrada — USAR ESTE"
     if "x1d" in low:
@@ -45,8 +50,10 @@ def _hint(name):
         return "CRUDO detector — no materiales"
     if "rateints" in low or "rateint" in low or "_rate." in low:
         return "rate detector — no mapa del cielo"
-    if "_cal" in low:
-        return "calibrado intermedio"
+    if "_cal" in low or low.endswith("cal.fits"):
+        return "calibrado"
+    if "_flt" in low:
+        return "flt exposicion simple"
     return ""
 
 def _row(rec, fallback_target=""):
@@ -96,7 +103,6 @@ def search_observations(target, missions, radius_deg=0.12, limit=40):
     return rows
 
 def list_mission_targets(mission, limit=60):
-    """Lista curada + muestra MAST. No es el archivo completo de la mision."""
     curated = [{"target": t, "source": "curated", "mission": mission} for t in CURATED.get(mission, [])]
     Observations = _obs()
     coll = {"HST": "HST", "JWST": "JWST", "ROMAN": "ROMAN", "HLSP": "HLSP"}.get(mission, mission)
@@ -111,13 +117,9 @@ def list_mission_targets(mission, limit=60):
                     continue
                 seen.add(name.upper())
                 extra.append({
-                    "target": name,
-                    "source": "mast",
-                    "mission": str(rec.get("obs_collection") or mission),
-                    "instrument": str(rec.get("instrument_name") or ""),
-                    "filters": str(rec.get("filters") or ""),
-                    "obsid": str(rec.get("obsid") or ""),
-                    "obs_id": str(rec.get("obs_id") or ""),
+                    "target": name, "source": "mast", "mission": str(rec.get("obs_collection") or mission),
+                    "instrument": str(rec.get("instrument_name") or ""), "filters": str(rec.get("filters") or ""),
+                    "obsid": str(rec.get("obsid") or ""), "obs_id": str(rec.get("obs_id") or ""),
                     "jpeg_url": _row(rec).get("jpeg_url"),
                 })
                 if len(extra) >= limit:
@@ -160,6 +162,8 @@ def list_fits_products(obsid, max_mb=None):
             if low.endswith(suf) or suf.replace(".fits", "") in low:
                 rank = i
                 break
+        if "skycell" in low or (size_mb is not None and size_mb > MAX_CLOUD_MB):
+            rank = 95
         if any(k in low for k in ("uncal", "rateints", "_rate.")):
             rank = 90
         out.append({
@@ -169,12 +173,13 @@ def list_fits_products(obsid, max_mb=None):
             "size_mb": size_mb,
             "uri": str(rec.get("dataURI") or ""),
             "rank": rank,
-            "hint": _hint(name),
+            "hint": _hint(name, size_mb),
+            "too_big": bool(size_mb is not None and size_mb > MAX_CLOUD_MB),
         })
     out.sort(key=lambda r: (r["rank"], 9999 if r["size_mb"] is None else r["size_mb"]))
     return out
 
-def download_product(uri, filename, max_mb=200.0):
+def download_product(uri, filename, max_mb=MAX_CLOUD_MB):
     Observations = _obs()
     from pathlib import Path
     tmp = Path("/tmp/cms80_mast")
@@ -193,5 +198,5 @@ def download_product(uri, filename, max_mb=200.0):
         path = found[-1]
     data = Path(path).read_bytes()
     if len(data) > max_mb * 1024 * 1024:
-        raise RuntimeError("FITS > %.0f MB. Elige i2d/x1d." % max_mb)
+        raise RuntimeError("FITS = %.0f MB > tope Cloud %.0f MB. Elige un flt/drc mas chico, no el skycell." % (len(data) / (1024 * 1024), max_mb))
     return data

@@ -2,6 +2,8 @@
 from __future__ import annotations
 import numpy as np
 
+FDR_SCOPE = ("aniso", "flatness", "entropy", "energy_mean")
+
 FEATURE_GETTERS = {
     "fractal_base": lambda r: r.get("complexity_score", np.nan),
     "kolmogorov_1941": lambda r: 0.6 * r.get("intermittency_factor", 0.0) + 0.4 * r.get("turbulence_intensity", 0.0),
@@ -150,10 +152,23 @@ def cheap_descriptor_pvalues(image, n_simulations=24, seed=None):
     return pmap
 
 def fdr_decision(p_map, alpha=0.05):
-    names = list(p_map.keys())
+    names = [k for k in FDR_SCOPE if k in p_map]
+    if not names:
+        names = list(p_map.keys())
     rejected, p_crit = benjamini_hochberg([p_map[k] for k in names], alpha=alpha)
     passed = [names[i] for i, ok in enumerate(rejected) if ok]
-    return {"method": "benjamini-hochberg", "alpha": alpha, "p_values": p_map, "p_critical": p_crit, "passed_descriptors": passed, "n_tested": len(names), "n_passed": len(passed), "fdr_pass": bool(len(passed) > 0)}
+    return {
+        "method": "benjamini-hochberg",
+        "alpha": alpha,
+        "scope": list(FDR_SCOPE),
+        "note": "FDR solo sobre estadisticos baratos del nulo de fase. Plugins ricos = not_tested.",
+        "p_values": p_map,
+        "p_critical": p_crit,
+        "passed_descriptors": passed,
+        "n_tested": len(names),
+        "n_passed": len(passed),
+        "fdr_pass": bool(len(passed) > 0),
+    }
 
 def adaptive_surrogate_null_test(image, observed_score, analyze_fn, n_start=24, n_expand=80, p_lo=0.04, p_hi=0.20, seed=None):
     first = surrogate_null_test(image, observed_score, analyze_fn, n_simulations=n_start, seed=seed)

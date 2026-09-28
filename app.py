@@ -1,4 +1,4 @@
-"""CMS-80: scout + catalogo por mision + rubrica."""
+"""CMS-80: scout + catalogo + IsolationForest."""
 import io
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,7 +27,7 @@ st.markdown("""<style>
 [data-testid="stSidebar"] { background:#010604 !important; }
 </style>""", unsafe_allow_html=True)
 st.markdown("## CMS-80  COSMIC MATERIALS SCOUT")
-st.caption("i2d/x1d \u00b7 FDR \u00b7 Kolmogorov real \u00b7 grafos \u00b7 catalogo por mision")
+st.caption("i2d/x1d \u00b7 IsolationForest \u00b7 FDR \u00b7 catalogo por mision")
 
 st.sidebar.markdown("`CONFIG`")
 source_url = st.sidebar.text_input("URL FITS DIRECTO", value="")
@@ -209,7 +209,23 @@ with tab_scout:
                     if prov["verdict"] != "usable_science" or prov.get("product_level") == "detector":
                         materials["is_candidate"] = False
                     st.write(materials["verdict"])
-                    st.metric("NOS", "%.2f" % nos["nos"])
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("NOS v0", "%.2f" % nos["nos"])
+                    emp = nos.get("empirical") or {}
+                    if emp.get("available"):
+                        c2.metric("ISOFOREST", "%.3f" % float(emp.get("nos_isoforest") or 0))
+                        c3.metric("OUTLIER", "SI" if emp.get("isoforest_outlier") else "NO")
+                        st.caption("fondo=%s  %s" % (emp.get("background"), emp.get("note")))
+                    else:
+                        c2.metric("ISOFOREST", "n/a")
+                    try:
+                        from nos_empirical import tile_isolation_forest
+                        tiles = tile_isolation_forest(image)
+                        figt = px.imshow(tiles["heatmap"], title="Rareza IsolationForest tiles  outliers=%s  pico=%s" % (tiles["n_outliers"], tiles["peak_tile"]), color_continuous_scale="Turbo")
+                        figt.update_layout(paper_bgcolor=BG, font=dict(color=PHOSPHOR))
+                        st.plotly_chart(figt, use_container_width=True)
+                    except Exception as exc:
+                        st.caption("iso tiles: %s" % exc)
                     fam = materials.get("family_scores") or {}
                     figb = px.bar(x=list(fam.keys()), y=list(fam.values()), title="MEZCLA DE FAMILIAS")
                     figb.update_traces(marker_color=PHOSPHOR)
@@ -224,15 +240,11 @@ with tab_scout:
                     g = plugin_results.get("graph_morphology") or {}
                     if g:
                         st.caption("GRAFO  nodos=%s aristas=%s componentes=%s clustering=%.3f gap=%s" % (g.get("n_nodes"), g.get("n_edges"), g.get("n_components"), g.get("clustering") or 0, g.get("spectral_gap")))
-                        adj = np.array(g.get("adjacency") or [[0]])
-                        fign = px.imshow(adj, title="Adyacencia de tiles", color_continuous_scale="Greens")
-                        fign.update_layout(paper_bgcolor=BG, font=dict(color=PHOSPHOR))
-                        st.plotly_chart(fign, use_container_width=True)
                     st.download_button("DUMP JSON", dumps_candidate(build_candidate(metadata["filename"], plugin_results, materials, prov, nos, mc, metadata, src)), file_name="cms80_%s.json" % metadata["filename"])
 
 with tab_cat:
     st.markdown("### Catalogo por mision")
-    st.caption("No es el archivo entero de Hubble/Webb/Roman. Curado + muestra MAST (timeout 45s).")
+    st.caption("Curado + muestra MAST. No es el archivo entero.")
     mission = st.selectbox("Mision", ["JWST", "HST", "ROMAN", "HLSP"])
     if st.button("LISTAR OBJETOS DE ESTA MISION", use_container_width=True):
         try:
@@ -241,7 +253,6 @@ with tab_cat:
                 st.session_state["cat_rows"] = list_mission_targets(mission)
         except Exception as exc:
             st.error(str(exc))
-            st.session_state["cat_rows"] = [{"target": t, "source": "curated", "mission": mission} for t in ["M16", "NGC 7023", "Crab Nebula"]]
     rows = st.session_state.get("cat_rows") or []
     if rows:
         st.dataframe(rows, hide_index=True, use_container_width=True)
@@ -253,20 +264,16 @@ with tab_cat:
                     from mast_client import search_observations
                     with st.spinner("MAST..."):
                         st.session_state["mast_obs"] = search_observations(chosen_t, [mission])
-                    st.success("Listo. Vuelve a SCOUT para ver observaciones y FITS.")
+                    st.success("Listo. Vuelve a SCOUT.")
                 except Exception as exc:
                     st.error(str(exc))
 
 with tab_rub:
-    st.markdown("### Rubrica de madurez")
-    st.info("Un PNG de HubbleSite no es un material. Un FITS i2d/x1d + espectro de la misma region es el unico camino a mir_unknown.")
+    st.markdown("### Rubrica")
+    st.info("IsolationForest ya puntua rareza. Sin corpus i2d usa fondo sintetico; no lo cites como descubrimiento.")
     st.table([
-        {"Capa": "Ingenieria / UI / MAST", "Hoy": "7.5", "Meta": "8.5", "Mueve": "timeout MAST, catalogo, plots"},
-        {"Capa": "Integridad cientifica", "Hoy": "7.5", "Meta": "8.5-9", "Mueve": "FDR, K62 real, ERR/DQ"},
-        {"Capa": "Poder de descubrimiento", "Hoy": "3.0", "Meta": "5-6 techo ~7", "Mueve": "corpus + NOS v1 + espectro"},
-        {"Capa": "Proteccion vs overclaim", "Hoy": "alta", "Meta": "alta", "Mueve": "estados honestos del JSON"},
+        {"Capa": "Ingenieria / UI / MAST", "Hoy": "7.5", "Meta": "8.5"},
+        {"Capa": "Integridad", "Hoy": "7.5", "Meta": "8.5-9"},
+        {"Capa": "Descubrimiento", "Hoy": "3.5", "Meta": "5-6 techo ~7"},
+        {"Capa": "Overclaim", "Hoy": "alta", "Meta": "alta"},
     ])
-    st.markdown("**Bloque 1** FDR, Kolmogorov sin random, beta con error — en codigo.")
-    st.markdown("**Bloque 2** corpus 200 i2d + IsolationForest — scripts listos, falta entrenar.")
-    st.markdown("**Bloque 3** scan_survey.py rankea rareza. El radar no es el microscopio.")
-    st.caption("Figuras sintéticas del one-pager siguen siendo ilustracion, no resultado.")

@@ -1,9 +1,7 @@
-"""Kolmogorov 1941/62: P(k), beta con error, kurtosis de incrementos, isotropia real."""
+"""Kolmogorov 1941/62: P(k) con bins log-k y SE honesto."""
 from __future__ import annotations
-
 import numpy as np
 from scipy import fft, stats
-
 
 def k62_intermittency(image):
     img = np.asarray(image, dtype=np.float64)
@@ -14,7 +12,6 @@ def k62_intermittency(image):
     if inc.size < 100 or inc.std() == 0:
         return float("nan")
     return float(stats.kurtosis(inc, fisher=False))
-
 
 def isotropic_score(image):
     img = np.asarray(image, dtype=np.float64)
@@ -39,23 +36,42 @@ def isotropic_score(image):
         return float("nan")
     return float(np.clip(1.0 - np.mean(cvs), 0.0, 1.0))
 
-
-def fit_beta_with_error(k, Pr):
+def fit_beta_with_error(k, Pr, n_bins=12):
     k = np.asarray(k, dtype=float)
     Pr = np.asarray(Pr, dtype=float)
     mask = (k > 0) & np.isfinite(Pr) & (Pr > 0)
     if int(mask.sum()) < 8:
-        return {"beta": 1.67, "beta_se": float("nan"), "r_squared": 0.0, "k_range": [float("nan"), float("nan")], "n_k_bins": int(mask.sum())}
+        return {"beta": float("nan"), "beta_se": float("nan"), "r_squared": 0.0, "k_range": [float("nan"), float("nan")], "n_k_bins": int(mask.sum())}
     log_k = np.log10(k[mask])
     log_P = np.log10(Pr[mask])
-    n = len(log_k)
-    lo, hi = n // 10, n - n // 10
-    if hi - lo < 5:
-        lo, hi = 0, n
-    slope, _intercept, r, se, _p = stats.linregress(log_k[lo:hi], log_P[lo:hi])
-    k_ok = k[mask]
-    return {"beta": float(-slope), "beta_se": float(se), "r_squared": float(r ** 2), "k_range": [float(k_ok[lo]), float(k_ok[min(hi, len(k_ok) - 1)])], "n_k_bins": int(hi - lo)}
-
+    lo, hi = float(log_k.min()), float(log_k.max())
+    if hi <= lo:
+        return {"beta": float("nan"), "beta_se": float("nan"), "r_squared": 0.0, "k_range": [float("nan"), float("nan")], "n_k_bins": 0}
+    edges = np.linspace(lo, hi, n_bins + 1)
+    xs, ys = [], []
+    for i in range(n_bins):
+        sel = (log_k >= edges[i]) & (log_k < edges[i + 1] if i < n_bins - 1 else log_k <= edges[i + 1])
+        if int(sel.sum()) < 2:
+            continue
+        xs.append(float(log_k[sel].mean()))
+        ys.append(float(log_P[sel].mean()))
+    if len(xs) < 5:
+        slope, _a, r, se, _p = stats.linregress(log_k, log_P)
+        beta_se = float(se)
+        if not np.isfinite(beta_se) or beta_se < 1e-4:
+            beta_se = float("nan")
+        return {"beta": float(-slope), "beta_se": beta_se, "r_squared": float(r ** 2), "k_range": [float(k[mask].min()), float(k[mask].max())], "n_k_bins": int(mask.sum())}
+    slope, _a, r, se, _p = stats.linregress(xs, ys)
+    beta_se = float(se)
+    if not np.isfinite(beta_se) or beta_se < 1e-4:
+        beta_se = float("nan")
+    return {
+        "beta": float(-slope),
+        "beta_se": beta_se,
+        "r_squared": float(r ** 2),
+        "k_range": [float(10 ** xs[0]), float(10 ** xs[-1])],
+        "n_k_bins": int(len(xs)),
+    }
 
 class Kolmogorov1941:
     def __init__(self, num_shells=20):
@@ -70,20 +86,30 @@ class Kolmogorov1941:
         fit = fit_beta_with_error(k_values, spectrum_radial)
         kurt = k62_intermittency(img)
         iso = isotropic_score(img)
-        inter = float(np.clip((kurt - 3.0) / 6.0, 0.0, 1.0)) if np.isfinite(kurt) else 0.0
+        clipped = False
+        if np.isfinite(kurt):
+            raw_inter = (kurt - 3.0) / 6.0
+            clipped = raw_inter > 1.0 or raw_inter < 0.0
+            inter = float(np.clip(raw_inter, 0.0, 1.0))
+        else:
+            inter = float("nan")
+        beta = fit["beta"]
+        if np.isfinite(beta):
+            beta = float(np.clip(beta, 0.0, 6.0))
         return {
             "k_values": k_values.tolist()[:50] if len(k_values) else [],
             "spectrum": spectrum_radial.tolist()[:50] if len(spectrum_radial) else [],
-            "beta": float(np.clip(fit["beta"], 0.0, 6.0)),
+            "beta": beta,
             "beta_se": fit["beta_se"],
             "r_squared": float(np.clip(fit["r_squared"], 0.0, 1.0)),
             "k_range": fit["k_range"],
             "n_k_bins": fit["n_k_bins"],
             "k62_kurtosis": kurt,
             "intermittency_factor": inter,
-            "turbulence_intensity": float(np.clip(1.0 - inter * 0.5, 0.0, 1.0)),
+            "intermittency_clipped": clipped,
+            "turbulence_intensity": float(np.clip(1.0 - (inter if np.isfinite(inter) else 0.0) * 0.5, 0.0, 1.0)),
             "integral_scale": float(np.mean(img.shape) / 4.0),
-            "isotropic_score": iso if np.isfinite(iso) else 0.0,
+            "isotropic_score": iso if np.isfinite(iso) else float("nan"),
         }
 
     def _radial_average(self, power_spectrum):

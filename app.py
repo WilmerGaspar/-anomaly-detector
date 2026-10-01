@@ -180,6 +180,8 @@ def sonify(img, sr=22050, dur=8.0, fmin=220.0, fmax=1760.0, ref=None):
     return (y * fade).astype(np.float32)
 
 
+from results_panel import render_results  # noqa: E402
+
 # ================================================================ 1. FUENTE DE DATOS
 st.markdown("### 1. Fuente de datos")
 source_kind = st.radio("Origen", ["Archivo MAST (STScI)", "Archivo propio", "URL directa"], horizontal=True, key="source_kind")
@@ -412,7 +414,8 @@ if st.button("Analizar", type="primary"):
         from materials_map import interpret
         from nos_morphological import morphological_nos
         from provenance import assess_provenance
-        from scoring import cheap_descriptor_pvalues, cheap_score_from_image, fdr_decision, surrogate_null_test
+        from analytics import full_analytics
+        from scoring import cheap_descriptor_null_details, cheap_score_from_image, fdr_decision, surrogate_null_test
 
         meta_full = dict(meta)
         meta_full.update({"crop": {"x0": int(x0), "y0": int(y0), "side": int(side)}, "nan_fraction": round(nan_frac, 4),
@@ -425,41 +428,26 @@ if st.button("Analizar", type="primary"):
         with st.spinner("Calculando descriptores y %d subrogados…" % n_null):
             results = run_plugins(crop, active)
             mc = surrogate_null_test(crop, None, cheap_score_from_image, n_simulations=n_null, seed=SEED)
-            fdr = fdr_decision(cheap_descriptor_pvalues(crop, n_simulations=n_null, seed=SEED + 1), n_simulations=n_null)
+            details = cheap_descriptor_null_details(crop, n_simulations=n_null, seed=SEED + 1)
+            fdr = fdr_decision({k: d["p"] for k, d in details.items()}, n_simulations=n_null)
+        with st.spinner("Espectro, escalas y mapa local…"):
+            analytics = full_analytics(crop, seed=SEED + 2)
         mc["fdr"] = fdr
+        mc["descriptor_nulls"] = {k: {kk: vv for kk, vv in d.items() if kk != "null"} for k, d in details.items()}
         materials = interpret(results, float(mc.get("z_score") or 0), float(mc.get("p_value") or 1),
                               fdr_pass=bool(fdr.get("fdr_pass")), provenance=prov, metadata=meta_full)
         nos = morphological_nos(results)
         cand = build_candidate(name, results, materials, prov, nos, mc, meta_full, src)
+        cand["analytics"] = analytics
         st.session_state["results"] = {"key": pkey + (x0, y0, side), "results": results, "mc": mc, "fdr": fdr,
-                                       "materials": materials, "nos": nos, "prov": prov, "json": dumps_candidate(cand)}
+                                       "materials": materials, "nos": nos, "prov": prov, "json": dumps_candidate(cand),
+                                       "details": details, "analytics": analytics}
     except Exception as exc:
         st.exception(exc)
 
 R = st.session_state.get("results")
 if R and R["key"] == pkey + (x0, y0, side):
-    mat, fdr, mc, nos, prov = R["materials"], R["fdr"], R["mc"], R["nos"], R["prov"]
-    st.markdown("**%s** — %s" % (mat.get("state"), mat.get("verdict")))
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Familia dominante", mat.get("dominant_label") or "—")
-    k2.metric("FDR", "pasa" if fdr.get("fdr_pass") else "no pasa")
-    k3.metric("p (score global)", "%.3f" % mc.get("p_value", 1.0))
-    k4.metric("Procedencia", "%s (%.2f)" % (prov.get("verdict"), float(prov.get("trust_score") or 0)))
-    if fdr.get("can_pass") is False:
-        st.warning("Con %d subrogados el FDR no puede pasar: sube el número en ajustes avanzados." % n_null)
-    st.dataframe([{"descriptor": k, "p": round(v, 4), "sobrevive FDR": "sí" if k in fdr.get("passed_descriptors", []) else "no"}
-                  for k, v in fdr.get("p_values", {}).items()], hide_index=True, use_container_width=True)
-    if mat.get("instrument_warning_reason"):
-        st.warning("Aviso de instrumento: %s" % mat["instrument_warning_reason"])
-    fam = mat.get("family_scores") or {}
-    if any(fam.values()):
-        st.bar_chart(fam)
-        st.caption("Cobertura de descriptores por familia: %s" % ", ".join("%s %.0f%%" % (k, 100 * v) for k, v in (mat.get("family_coverage") or {}).items()))
-    errors = {k: v["error"] for k, v in R["results"].items() if isinstance(v, dict) and "error" in v}
-    if errors:
-        st.error("Descriptores que fallaron (excluidos, no imputados): " + "; ".join("%s: %s" % kv for kv in errors.items()))
-    st.caption("Análogo de laboratorio (descriptivo, no identificación): %s. Seguimiento: %s." % (mat.get("lab_analog"), mat.get("followup")))
-    st.download_button("Descargar informe JSON", R["json"], file_name="cms80_%s_x%d_y%d_s%d.json" % (str(name).split(".")[0], x0, y0, side))
+    render_results(R, crop, name, x0, y0, side, n_null)
 
 with st.expander("Cómo citar y límites"):
     st.markdown(MAST_ACK)

@@ -200,7 +200,9 @@ def _cheap_metrics(image):
     return {"aniso": aniso, "flatness_lag1": _flatness(d1), "flatness_lag4": _flatness(d4), "incr_skew": skew}
 
 
-def cheap_descriptor_pvalues(image, n_simulations=DEFAULT_N_NULL, seed=None, method="iaaft"):
+def cheap_descriptor_null_details(image, n_simulations=DEFAULT_N_NULL, seed=None, method="iaaft"):
+    """Como cheap_descriptor_pvalues, pero devuelve por descriptor el valor
+    observado, la distribucion nula completa, p, z y la banda 5-95 % del nulo."""
     rng = np.random.default_rng(seed)
     small = downsample_for_null(image)
     obs = _cheap_metrics(small)
@@ -214,7 +216,21 @@ def cheap_descriptor_pvalues(image, n_simulations=DEFAULT_N_NULL, seed=None, met
         for k, val in m.items():
             if np.isfinite(val):
                 nulls[k].append(val)
-    return {k: mc_p_value(nulls[k], val) for k, val in obs.items()}
+    out = {}
+    for k, val in obs.items():
+        null = np.asarray(nulls[k], dtype=float)
+        sd = float(null.std(ddof=1)) if null.size > 1 else 0.0
+        mean = float(null.mean()) if null.size else float("nan")
+        out[k] = {"observed": float(val), "null": null.tolist(), "p": mc_p_value(null, val),
+                  "null_mean": mean, "null_std": sd, "z": float((val - mean) / sd) if sd > 0 else 0.0,
+                  "null_q05": float(np.percentile(null, 5)) if null.size else float("nan"),
+                  "null_q95": float(np.percentile(null, 95)) if null.size else float("nan")}
+    return out
+
+
+def cheap_descriptor_pvalues(image, n_simulations=DEFAULT_N_NULL, seed=None, method="iaaft"):
+    details = cheap_descriptor_null_details(image, n_simulations=n_simulations, seed=seed, method=method)
+    return {k: d["p"] for k, d in details.items()}
 
 
 def benjamini_hochberg(p_values, alpha=0.05):

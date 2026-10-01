@@ -123,3 +123,32 @@ Los tests están en `tests/test_null_calibration.py`.
 `candidate_export.py`, `report_generator.py`, `local_rarity.py`,
 `instrument_mask.py`, `fits_quality.py`, `reproducibility.py` y los tests
 existentes. La app conserva las mismas llamadas a esos módulos.
+
+## Panel analítico (`analytics.py`, `results_panel.py`)
+
+25. El paso 4 se reorganiza en pestañas; cada número aparece junto a su nulo:
+    - **Nulo y FDR:** tabla por descriptor (observado, media y banda 5–95 % del
+      nulo, z, p, umbral BH, qué mide), histograma de la distribución nula de
+      cada descriptor con el valor observado, gráfico de Benjamini-Hochberg y
+      distribución nula del score global.
+    - **Espectro:** P(k) radial con ventana de Hann, ajuste k^-β con R² en
+      k = 0.02–0.25 y curva del subrogado (si no se solapa, el nulo no es válido).
+    - **Escalas:** curtosis de incrementos a 1–16 px frente a la banda de 19
+      subrogados IAAFT, e histograma log de incrementos (región, subrogado, gaussiana).
+    - **Mapa local:** z de `flatness_lag1` en 4×4 teselas, cada una contra sus
+      propios subrogados. Exploratorio, sin corrección múltiple.
+    - **Familias:** puntuación con cobertura y margen entre las dos primeras.
+    - **Descriptores:** tabla completa de valores numéricos de todos los plugins.
+    - **Región vs nulo:** región, subrogado IAAFT y |∇| lado a lado.
+26. `cheap_descriptor_null_details` (en `scoring.py`) devuelve la distribución
+    nula completa; `cheap_descriptor_pvalues` lo usa y da los mismos p.
+27. Exportación: el JSON incluye `analytics` y un resumen de nulos por
+    descriptor; hay además CSV de tests y CSV de descriptores.
+28. `requirements.txt`: `streamlit>=1.35` (la app ya lo exigía).
+29. Tests nuevos en `tests/test_analytics.py` (β recuperado en campo gaussiano,
+    filamentos detectados por escala, coherencia de p, mapa local, utilidades).
+
+**Observación pendiente de revisar.** Los subrogados IAAFT de un campo
+gaussiano tienen curtosis de incrementos a 1 px ≈ 3.9 en lugar de 3.0. El test
+es de una cola, así que no genera falsos positivos, pero resta potencia a
+`flatness_lag1`: una intermitencia moderada puede quedar dentro del nulo.

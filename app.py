@@ -5,7 +5,6 @@ Flujo unico: 1) fuente de datos con procedencia visible, 2) imagen y region,
 Requiere streamlit >= 1.35 (seleccion de filas en st.dataframe).
 """
 import io
-import json
 
 import numpy as np
 import streamlit as st
@@ -42,6 +41,7 @@ with st.sidebar:
         "kolmogorov_1941": st.checkbox("Espectro P(k) e intermitencia", True),
         "periodicity": st.checkbox("Periodicidad FFT", True),
         "anisotropy": st.checkbox("Anisotropía", True),
+        "ridges": st.checkbox("Crestas / filamentos", True),
         "persistent_homology": st.checkbox("Topología", True),
         "renormalization_group": st.checkbox("Coarse-graining (RG)", True),
         "entropy": st.checkbox("Entropía de Shannon", True),
@@ -60,7 +60,8 @@ def run_plugins(image, active):
                    ("renormalization_group", "plugins.renormalization_group", "RenormalizationGroup")]
     fn_steps = [("anisotropy", "plugins.anisotropy", "calculate_anisotropy"), ("entropy", "plugins.entropy", "calculate_entropy"),
                 ("periodicity", "plugins.periodicity", "analyze_periodicity"), ("fibonacci", "plugins.fibonacci", "analyze_fibonacci"),
-                ("graph_morphology", "plugins.graph_morphology", "analyze_graph")]
+                ("graph_morphology", "plugins.graph_morphology", "analyze_graph"),
+                ("ridges", "plugins.ridges", "analyze_ridges")]
     for key, mod, cls in class_steps:
         if key in active:
             try:

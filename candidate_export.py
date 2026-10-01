@@ -65,7 +65,9 @@ def _thin_descriptors(plugin_results):
     keep = {
         "fractal_base": ("d0", "d1", "d2", "lacunarity", "multifractality_index", "p"),
         "kolmogorov_1941": ("beta", "beta_se", "r_squared", "k_range", "n_k_bins", "k62_kurtosis", "intermittency_factor", "intermittency_clipped", "isotropic_score", "p"),
-        "periodicity": ("periodicity_score", "n_significant_peaks", "lattice_hint", "likely_instrument_artifact", "axis_aligned_fraction", "note", "p"),
+        "periodicity": ("periodicity_score", "n_significant_peaks", "lattice_hint", "likely_instrument_artifact", "axis_aligned_fraction",
+                        "peak_threshold", "n_streaks", "streak_angles_deg", "note", "p"),
+        "ridges": ("filament_fraction", "filament_fraction_null", "filament_excess", "threshold", "min_length_px", "n_surrogates", "note"),
         "anisotropy": ("anisotropy_index", "dominant_direction_degrees", "p"),
         "persistent_homology": ("betti_0", "betti_1", "euler_characteristic", "p"),
         "renormalization_group": ("correlation_length", "correlation_length_clipped", "correlation_length_max_lag", "scale_invariance_score", "p", "note"),

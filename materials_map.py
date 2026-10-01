@@ -65,6 +65,11 @@ def _map(x, fn):
     return None if x is None else fn(x)
 
 
+def _max(*vals):
+    vals = [v for v in vals if v is not None]
+    return max(vals) if vals else None
+
+
 def _wavg(terms, shared=()):
     """Promedio ponderado ignorando terminos None; renormaliza pesos.
     `shared` son terminos comunes a todas las familias (p. ej. el z del nulo):
@@ -106,13 +111,19 @@ def family_scores(plugin_results, structure_z=0.0, return_coverage=False):
     per = _g(plugin_results, "periodicity", "periodicity_score")
     artifact = bool((plugin_results.get("periodicity") or {}).get("likely_instrument_artifact", False))
     entropy_n = _g(plugin_results, "entropy", "normalized_entropy")
+    # Crestas largas frente a subrogados IAAFT (plugins/ridges.py). Medido en controles
+    # sinteticos: ruido/red/manchas <= 0.001; filamentos rectos o curvos 0.011-0.030.
+    ridge = _map(_g(plugin_results, "ridges", "filament_excess"), lambda v: _clip(v / 0.01))
+    n_streaks = _g(plugin_results, "periodicity", "n_streaks")
+    streak = _map(n_streaks, lambda v: 1.0 if v >= 1 else 0.0)
     z = float(structure_z) if structure_z is not None else 0.0
     zpos = min(max(0.0, z) / 6.0, 1.0)
 
     raw = {
         "aggregate": _wavg([(0.35, _band(d0, 1.35, 1.85)), (0.25, _band(lac, 1.2, 4.0)), (0.20, _band(multi, 0.15, 1.2))], shared=[(0.20, zpos)]),
         "cascade": _wavg([(0.40, _band(beta, 1.4, 3.2)), (0.30, inter), (0.15, iso)], shared=[(0.15, zpos)]),
-        "filament": _wavg([(0.45, aniso), (0.20, _map(iso, lambda v: 1.0 - v)), (0.20, _band(b1, 1, 20))], shared=[(0.15, zpos)]),
+        "filament": _wavg([(0.55, _max(ridge, streak)), (0.15, aniso), (0.05, _map(iso, lambda v: 1.0 - v)), (0.10, _band(b1, 1, 20))],
+                          shared=[(0.15, zpos)]),
         "lattice": _wavg([(0.70, per), (0.20, _band(b1, 2, 30)), (0.10, _map(entropy_n, lambda v: 1.0 - v))]),
         "compact": _wavg([(0.35, _band(d0, 0.8, 1.35)), (0.25, _map(b0, lambda v: 1.0 if v <= 2 else 0.0)),
                           (0.20, _map(entropy_n, lambda v: 1.0 - min(v, 1.0))), (0.20, _band(beta, 3.0, 6.0))]),

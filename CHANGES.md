@@ -152,3 +152,46 @@ existentes. La app conserva las mismas llamadas a esos módulos.
 gaussiano tienen curtosis de incrementos a 1 px ≈ 3.9 en lugar de 3.0. El test
 es de una cola, así que no genera falsos positivos, pero resta potencia a
 `flatness_lag1`: una intermitencia moderada puede quedar dentro del nulo.
+
+## Correcciones medidas (periodicidad, filamentos, sensibilidad del nulo)
+
+Controles sintéticos usados: campos gaussianos β ∈ {2, 2.8, 3.5}, red
+hexagonal, rejilla girada, fringing alineado al eje, filamentos rectos
+(cruzados y paralelos), arcos curvos y manchas compactas. Los tests están en
+`tests/test_periodicity_ridges.py`.
+
+30. **`periodicity`: el ruido se marcaba como red.** El umbral fijo de exceso
+    (8) quedaba por debajo de la mediana del máximo en ruido puro (≈ 9 en
+    imágenes de 128 a 400 px). Un campo gaussiano daba `periodicity_score` 0.48.
+    Ahora el umbral es ln(N/0.01), Bonferroni al 1 % sobre los píxeles
+    independientes del espectro (≈ 13.9 con 256 px). Ruido: 0 picos en 90 campos
+    de 128 a 400 px. Con 800 px, 1 pico en el 10 % de los campos (score medio 0.02).
+31. **`periodicity`: picos perdidos.** El bucle solo examinaba 1 de cada 2–3
+    píxeles, y un pico cuyo máximo caía en un píxel saltado desaparecía. Una
+    rejilla girada de amplitud 0.8σ daba score 0 con el código original; ahora
+    da 0.99. La búsqueda es vectorizada sobre todos los píxeles.
+32. **`periodicity`: las líneas rectas contaban como red.** Una línea deja
+    en la FFT una raya de picos con el mismo ángulo a frecuencias no armónicas.
+    Esos grupos (≥ 3 picos, ±6°, no armónicos) se separan como `streak_angles_deg`
+    y no puntúan como periodicidad. Una franja de fringing con un solo pico
+    significativo alineado al eje ya basta para el aviso de artefacto.
+33. **Nuevo `plugins/ridges.py` y familia `filament`.** La familia dependía
+    del índice de anisotropía, que es bajo cuando los filamentos tienen varias
+    orientaciones. El plugin mide crestas brillantes (hessiano, σ = 1 y 2 px)
+    con el umbral fijado en el percentil 95 de 3 subrogados IAAFT, y cuenta los
+    píxeles de esqueletos de al menos 12 px. Exceso medido: ruido, red y manchas
+    ≤ 0.001; filamentos rectos o curvos 0.011–0.030. `filament` usa ahora
+    max(crestas, rayas FFT) con peso 0.55. Resultado en 9 imágenes con
+    filamentos: `filament` queda primera en las 9 (antes ganaba `lattice`).
+    El margen sigue por debajo de 0.05, así que la app dice "Mezcla": el fondo
+    turbulento puntúa legítimamente como cascade/aggregate. La red hexagonal
+    sigue en `lattice` y el ruido y las manchas no dan `filament`.
+34. **Sensibilidad del nulo IAAFT (no es un fallo de código).** Con espectros
+    empinados, la reordenación por rangos de IAAFT da a los subrogados más
+    curtosis de incrementos que el campo real: 2.99 con β = 2, 3.24 con β = 2.8
+    y 4.38 con β = 3.5, frente a 3.0 con subrogados de fase. No depende del
+    número de iteraciones, del punto de arranque ni de devolver el paso de
+    espectro exacto (se midieron las tres variantes). El test sigue sin dar
+    falsos positivos (es de una cola), pero pierde potencia. No se cambia el
+    nulo: el de fase rompe la calibración con histogramas recortados (punto 4).
+    La app avisa cuando β > 2.5.

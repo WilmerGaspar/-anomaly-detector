@@ -58,6 +58,12 @@ def _tab_null(R, n_null):
     st.caption("Test de una cola: solo cuenta que el observado esté POR ENCIMA del nulo (z positivo). "
                "p = (1 + #nulo ≥ obs)/(n + 1); p mínimo posible con %d subrogados = %.4f." % (n_null, 1 / (n_null + 1)))
 
+    beta = R["analytics"]["spectrum"]["fit"]["beta"]
+    if np.isfinite(beta) and beta > 2.5:
+        st.info("β = %.2f: con espectros empinados, los subrogados IAAFT tienen más curtosis que el campo real "
+                "(medido en campos gaussianos: 3.24 con β=2.8 y 4.38 con β=3.5, frente a 3.0). El test sigue sin dar "
+                "falsos positivos, pero `aniso` y `flatness_lag1` pierden sensibilidad: un \"no pasa\" aquí no descarta "
+                "estructura fina. Mira también las pestañas Escalas y Familias (crestas)." % beta)
     keys = list(details)
     fig = make_subplots(rows=2, cols=2, subplot_titles=["%s  (z=%+.2f, p=%.3f)" % (k, details[k]["z"], details[k]["p"]) for k in keys])
     for i, k in enumerate(keys[:4]):
@@ -143,7 +149,7 @@ def _tab_local(A, crop):
     lm = A["local_map"]
     z = np.array(lm["z"], dtype=float)
     if np.all(~np.isfinite(z)):
-        st.info("Región demasiado pequeña para el mapa local (%s)." % lm.get("note", ""))
+        st.info("Región demasiado pequeña para el mapa local: cada tesela necesita al menos 16 px de lado.")
         return
     g = lm["grid"]
     fig = make_subplots(rows=1, cols=2, subplot_titles=["Región", "z local de %s" % lm["metric"]], horizontal_spacing=0.08)
@@ -179,6 +185,12 @@ def _tab_families(R):
     if len(order) > 1:
         st.caption("Margen entre la primera y la segunda familia: %.3f. Un margen pequeño significa clasificación ambigua."
                    % (fam[order[0]] - fam[order[1]]))
+    rid = R["results"].get("ridges") or {}
+    per = R["results"].get("periodicity") or {}
+    if "filament_excess" in rid:
+        st.caption("Crestas largas: %.2f %% de la región frente a %.2f %% en subrogados IAAFT (exceso %.4f; en controles "
+                   "sintéticos el ruido da ≤ 0.001 y los filamentos 0.011–0.030). Rayas en la FFT (líneas rectas): %d."
+                   % (100 * rid["filament_fraction"], 100 * rid["filament_fraction_null"], rid["filament_excess"], per.get("n_streaks", 0)))
     st.caption("Análogo de laboratorio (descriptivo, no identificación): %s. Seguimiento: %s." % (mat.get("lab_analog"), mat.get("followup")))
     nos = R.get("nos")
     if isinstance(nos, dict) and nos:

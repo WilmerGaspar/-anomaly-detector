@@ -101,3 +101,20 @@ def test_filament_family_beats_lattice_for_lines(seed):
 def test_lattice_family_wins_for_grid():
     s = family_scores(_plugins(_stretch(_grid())), structure_z=3.0)
     assert s["lattice"] > s["filament"]
+
+
+def test_empty_region_is_never_a_candidate():
+    from materials_map import interpret
+    r = interpret({}, 5.0, 0.01, fdr_pass=True, provenance={"verdict": "usable_science"}, empty_fraction=0.12)
+    assert r["state"] == "invalid_region" and not r["is_candidate"]
+    ok = interpret({}, 5.0, 0.01, fdr_pass=True, provenance={"verdict": "usable_science"}, empty_fraction=0.0)
+    assert ok["state"] != "invalid_region"
+
+
+def test_local_map_skips_tiles_with_empty_pixels():
+    from analytics import local_significance_map
+    img = _field(seed=4)
+    valid = np.ones_like(img, dtype=bool)
+    valid[:20, :20] = False
+    z = np.array(local_significance_map(img, grid=2, n_surrogates=3, seed=0, valid=valid)["z"])
+    assert np.isnan(z[0, 0]) and np.all(np.isfinite(z.ravel()[1:]))

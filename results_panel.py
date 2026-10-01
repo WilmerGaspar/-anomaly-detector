@@ -229,7 +229,10 @@ def _tab_compare(crop):
 
 def render_results(R, crop, name, x0, y0, side, n_null):
     mat, fdr, mc, prov, A, details = R["materials"], R["fdr"], R["mc"], R["prov"], R["analytics"], R["details"]
-    st.markdown("**%s** — %s" % (mat.get("state"), mat.get("verdict")))
+    if mat.get("state") == "invalid_region":
+        st.error("**Resultado NO VÁLIDO** — %s Las pestañas se muestran solo como diagnóstico." % mat.get("verdict"))
+    else:
+        st.markdown("**%s** — %s" % (mat.get("state"), mat.get("verdict")))
     k1, k2, k3 = st.columns(3)
     k4, k5, k6 = st.columns(3)
     k1.metric("Familia dominante", mat.get("dominant_label") or "—")

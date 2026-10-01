@@ -24,6 +24,7 @@ from mast_client import CURATED, MAST_ACK, MAX_CLOUD_MB, NOTES  # noqa: E402
 SEED = 80
 MAX_ANALYSIS_SIDE = 2048
 PREVIEW_SIDE = 900
+MAX_EMPTY_FRACTION = 0.001   # zonas vacias grandes; medido: con 1 % ya aparecen falsos positivos (1 de 10)
 
 st.markdown("## CMS-80 Cosmic Materials Scout")
 st.caption("Busca organización espacial tipo material en imágenes científicas (FITS) y la compara con un nulo "
@@ -139,6 +140,49 @@ def finite_bbox(data):
     if rows.size == 0:
         return None
     return int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
+
+
+def large_holes(data, min_area=64):
+    """Mascara de huecos grandes: componentes conectadas de NaN/inf con >= min_area pixeles
+    (bordes de mosaico). Los pixeles malos sueltos no cuentan: medido, con 1 % de NaN
+    sueltos rellenados con la mediana, 0 de 8 campos sin estructura pasan el FDR."""
+    from scipy.ndimage import label
+    bad = ~np.isfinite(data)
+    if not bad.any():
+        return bad
+    lab, n = label(bad)
+    sizes = np.bincount(lab.ravel())
+    big = sizes >= min_area
+    big[0] = False
+    return big[lab]
+
+
+def largest_finite_square(data, max_side=MAX_ANALYSIS_SIDE, min_side=32, holes=None):
+    """Mayor cuadrado sin huecos (por defecto, sin ningun NaN/inf): (y0, x0, side) o None.
+    Busqueda binaria sobre el lado; cada prueba cuenta los vacios de todas las
+    ventanas side x side con una imagen integral (O(H*W) por prueba)."""
+    bad = (holes if holes is not None else ~np.isfinite(data)).astype(np.int32)
+    ii = np.zeros((bad.shape[0] + 1, bad.shape[1] + 1), dtype=np.int64)
+    ii[1:, 1:] = bad.cumsum(0).cumsum(1)
+
+    def find(side):
+        win = ii[side:, side:] - ii[:-side, side:] - ii[side:, :-side] + ii[:-side, :-side]
+        ys, xs = np.nonzero(win == 0)
+        if ys.size == 0:
+            return None
+        cy, cx = (data.shape[0] - side) / 2, (data.shape[1] - side) / 2     # la mas centrada
+        k = int(np.argmin((ys - cy) ** 2 + (xs - cx) ** 2))
+        return int(ys[k]), int(xs[k]), int(side)
+
+    lo, hi, best = min_side, min(max_side, *data.shape), None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        got = find(mid)
+        if got:
+            best, lo = got, mid + 1
+        else:
+            hi = mid - 1
+    return best
 
 
 def stretch(a, lo=2, hi=98):
@@ -350,7 +394,20 @@ if bbox is None:
 r0, r1, c0, c1 = bbox
 H, W = data.shape
 max_side = min(H, W, MAX_ANALYSIS_SIDE)
-def_side = min(r1 - r0, c1 - c0, 1024)
+# Region por defecto: el mayor cuadrado sin pixeles vacios. Los bordes NaN de los
+# mosaicos, rellenados con la mediana, crean escalones que el nulo toma por
+# estructura (medido: con 12 % de vacio, 2 de 6 campos sin estructura pasan el FDR).
+if st.session_state.get("clean_key") != pkey:
+    st.session_state["holes"] = large_holes(data)
+    st.session_state["clean_sq"] = largest_finite_square(data, holes=st.session_state["holes"])
+    st.session_state["clean_key"] = pkey
+holes = st.session_state["holes"]
+clean = st.session_state["clean_sq"]
+if clean:
+    def_y, def_x, def_side = clean
+else:
+    def_side = min(r1 - r0, c1 - c0, 1024)
+    def_y, def_x = (r0 + r1 - def_side) // 2, (c0 + c1 - def_side) // 2
 if max_side < 32:
     st.error("La imagen es demasiado pequeña (%dx%d) para analizarla." % (W, H))
     st.stop()
@@ -366,11 +423,16 @@ def _slider(col, label, lo, hi, default):
 
 s1, s2, s3 = st.columns(3)
 side = _slider(s1, "Tamaño de la región (px)", 32, max_side, min(def_side, max_side))
-y0 = _slider(s2, "Fila inicial (y)", 0, H - side, (r0 + r1 - side) // 2)
-x0 = _slider(s3, "Columna inicial (x)", 0, W - side, (c0 + c1 - side) // 2)
+y0 = _slider(s2, "Fila inicial (y)", 0, H - side, def_y + (def_side - side) // 2)
+x0 = _slider(s3, "Columna inicial (x)", 0, W - side, def_x + (def_side - side) // 2)
+if clean:
+    st.caption("Región sin píxeles vacíos más grande: %d px en x=%d, y=%d (valores por defecto)." % (clean[2], clean[1], clean[0]))
+else:
+    st.warning("No hay ningún cuadrado de 32 px sin píxeles vacíos: el resultado no será válido.")
 
 crop_raw = data[y0:y0 + side, x0:x0 + side]
-nan_frac = float(np.mean(~np.isfinite(crop_raw)))
+nan_frac = float(np.mean(~np.isfinite(crop_raw)))                 # todos los NaN (informativo)
+hole_frac = float(np.mean(holes[y0:y0 + side, x0:x0 + side]))    # solo huecos grandes: decide la validez
 crop, (p_lo, p_hi) = stretch(crop_raw)
 
 left, right = st.columns([3, 2])
@@ -382,9 +444,12 @@ right.markdown(
     % (meta.get("telescope") or "—", meta.get("instrument") or "—", meta.get("filter") or "—", meta.get("target_header") or "—",
        meta.get("date_obs") or "—", meta.get("program") or "—", meta.get("hdu") or "—", meta.get("bunit") or "—"),
     unsafe_allow_html=True)
-if nan_frac > 0.05:
-    st.warning("%.0f%% de la región son píxeles vacíos (borde del mosaico). Se rellenan con la mediana, lo que crea "
-               "bordes artificiales: mueve o reduce la región." % (100 * nan_frac))
+if hole_frac > MAX_EMPTY_FRACTION:
+    st.error("%.1f%% de la región son zonas vacías (borde del mosaico). Se rellenan con la mediana y eso crea bordes "
+             "artificiales que el nulo detecta como estructura: el resultado se marcará como NO VÁLIDO. Mueve o reduce "
+             "la región (los valores por defecto ya la evitan)." % (100 * hole_frac))
+elif nan_frac > 0:
+    st.caption("%.2f%% de píxeles sueltos sin dato (píxeles malos), rellenados con la mediana. No afectan a la validez." % (100 * nan_frac))
 if not meta.get("is_fits"):
     st.warning("Imagen no científica (%s): el estiramiento y la compresión alteran la estadística. Usa FITS para conclusiones." % meta.get("format"))
 
@@ -419,7 +484,7 @@ if st.button("Analizar", type="primary"):
         from scoring import cheap_descriptor_null_details, cheap_score_from_image, fdr_decision, surrogate_null_test
 
         meta_full = dict(meta)
-        meta_full.update({"crop": {"x0": int(x0), "y0": int(y0), "side": int(side)}, "nan_fraction": round(nan_frac, 4),
+        meta_full.update({"crop": {"x0": int(x0), "y0": int(y0), "side": int(side)}, "nan_fraction": round(nan_frac, 4), "empty_area_fraction": round(hole_frac, 4),
                           "normalization": {"method": "percentil 2-98 sobre pixeles finitos, NaN -> mediana, recorte [0,1]",
                                             "p2": p_lo, "p98": p_hi},
                           "null": {"method": "iaaft", "n_simulations": int(n_null), "seed": SEED},
@@ -432,11 +497,12 @@ if st.button("Analizar", type="primary"):
             details = cheap_descriptor_null_details(crop, n_simulations=n_null, seed=SEED + 1)
             fdr = fdr_decision({k: d["p"] for k, d in details.items()}, n_simulations=n_null)
         with st.spinner("Espectro, escalas y mapa local…"):
-            analytics = full_analytics(crop, seed=SEED + 2)
+            analytics = full_analytics(crop, seed=SEED + 2, valid=~holes[y0:y0 + side, x0:x0 + side])
         mc["fdr"] = fdr
         mc["descriptor_nulls"] = {k: {kk: vv for kk, vv in d.items() if kk != "null"} for k, d in details.items()}
         materials = interpret(results, float(mc.get("z_score") or 0), float(mc.get("p_value") or 1),
-                              fdr_pass=bool(fdr.get("fdr_pass")), provenance=prov, metadata=meta_full)
+                              fdr_pass=bool(fdr.get("fdr_pass")), provenance=prov, metadata=meta_full,
+                              empty_fraction=hole_frac, max_empty_fraction=MAX_EMPTY_FRACTION)
         nos = morphological_nos(results)
         cand = build_candidate(name, results, materials, prov, nos, mc, meta_full, src)
         cand["analytics"] = analytics

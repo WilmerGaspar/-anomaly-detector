@@ -101,10 +101,11 @@ def increment_histograms(image, lag=1, seed=None, bins=60, max_side=256):
 
 # ---------------------------------------------------------------- mapa local
 
-def local_significance_map(image, grid=4, n_surrogates=19, seed=None, tile_side=64, metric="flatness_lag1"):
+def local_significance_map(image, grid=4, n_surrogates=19, seed=None, tile_side=64, metric="flatness_lag1", valid=None):
     """Divide la region en grid x grid teselas y calcula, en cada una, z del descriptor
     frente a sus propios subrogados IAAFT. Exploratorio: con 19 subrogados z es aproximado
-    y no hay correccion por comparaciones multiples."""
+    y no hay correccion por comparaciones multiples. `valid` (mascara de pixeles con dato):
+    las teselas con algun pixel vacio quedan en NaN en lugar de evaluarse."""
     rng = np.random.default_rng(seed)
     img = np.asarray(image, dtype=np.float64)
     h, w = img.shape
@@ -115,6 +116,8 @@ def local_significance_map(image, grid=4, n_surrogates=19, seed=None, tile_side=
         return {"z": z.tolist(), "observed": obs.tolist(), "grid": grid, "metric": metric, "note": "región demasiado pequeña"}
     for i in range(grid):
         for j in range(grid):
+            if valid is not None and not np.all(valid[i * th:(i + 1) * th, j * tw:(j + 1) * tw]):
+                continue
             tile = downsample_for_null(img[i * th:(i + 1) * th, j * tw:(j + 1) * tw], max_side=tile_side)
             if tile.std() == 0:
                 continue
@@ -156,7 +159,7 @@ def surrogate_preview(image, seed=None, max_side=256):
     return small, iaaft_surrogate(small, np.random.default_rng(seed))
 
 
-def full_analytics(image, seed=None):
+def full_analytics(image, seed=None, valid=None):
     """Todo el paquete analitico en un dict serializable a JSON."""
     small = downsample_for_null(image, max_side=256)
     k, p = radial_power_spectrum(small)
@@ -165,4 +168,4 @@ def full_analytics(image, seed=None):
     return {"spectrum": {"k": k.tolist(), "p": p.tolist(), "p_surrogate": ps.tolist(), "fit": fit_power_law(k, p)},
             "scales": scale_profile(image, seed=seed),
             "increments": increment_histograms(image, seed=seed),
-            "local_map": local_significance_map(image, seed=seed)}
+            "local_map": local_significance_map(image, seed=seed, valid=valid)}

@@ -49,6 +49,7 @@ def build_candidate(filename, plugin_results, materials, provenance, nos, monte_
             "instrument_warning": bool(materials.get("instrument_warning")),
             "instrument_warning_reason": materials.get("instrument_warning_reason"),
         },
+        "analysis": {k: meta.get(k) for k in ("crop", "nan_fraction", "empty_area_fraction", "normalization", "null", "active_descriptors", "hdu")},
         "nos_morphological": nos_pub,
         "structure_test": {
             "method": mc.get("method"), "p_value": mc.get("p_value"), "z_score": mc.get("z_score"),
@@ -56,7 +57,7 @@ def build_candidate(filename, plugin_results, materials, provenance, nos, monte_
             "p_critical": fdr.get("p_critical"), "fdr_pass": fdr.get("fdr_pass"),
         },
         "descriptors": desc,
-        "followup": {"action": materials.get("followup"), "needs_spectrum": True, "reject_if": "state in (reject, exploratory_only, known_or_weak)"},
+        "followup": {"action": materials.get("followup"), "needs_spectrum": True, "reject_if": "state in (reject, exploratory_only, known_or_weak, invalid_region)"},
         "spectrum": {"status": "missing", "kind": None, "xy": None, "notes": "Pegar espectro de la MISMA region."},
         "spectral_identifier_handoff": {"target": "WilmerGaspar/spectral-identifier-v1", "ready": False, "reason": "Sin xy espectral no hay identificacion."},
     }

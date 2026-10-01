@@ -195,3 +195,27 @@ hexagonal, rejilla girada, fringing alineado al eje, filamentos rectos
     falsos positivos (es de una cola), pero pierde potencia. No se cambia el
     nulo: el de fase rompe la calibración con histogramas recortados (punto 4).
     La app avisa cuando β > 2.5.
+
+## Bordes vacíos de mosaico (detectado con un resultado real de MIRI)
+
+Un análisis real (`jw01192006001_0310h_00001_mirimage_i2d`, región x=15, y=8,
+1006 px) salió `needs_spectrum` con 3 de 4 descriptores en el FDR. Dos teselas
+del mapa local eran NaN, lo que solo ocurre cuando la tesela entera es borde
+vacío rellenado con la mediana: al menos el 12 % de la región no tenía dato.
+
+35. **Medido:** campos gaussianos sin estructura más una cuña vacía rellenada con
+    la mediana (igual que hace la app). El FDR pasa en 0/6 campos con 0 % de
+    vacío, 1/6 con 5 %, 2/6 con 12 % y 4/6 con 20 %; con 1–2 % pasa en 1/10, y
+    con 0.5 % en 0/10. El escalón del borde se lee como estructura.
+36. **Píxeles malos sueltos no son el problema:** con 0.2 % y 1 % de NaN
+    aislados, 0/8 campos pasan, tanto con relleno por mediana global como local.
+37. **Región por defecto = mayor cuadrado sin zonas vacías** (`largest_finite_square`,
+    búsqueda binaria con imagen integral; 0.9 s en 4200×4200). Las "zonas vacías"
+    son componentes de NaN de ≥ 64 píxeles (`large_holes`); los sueltos no cuentan.
+38. **Región con > 0.1 % de zona vacía = `invalid_region`:** nunca es candidata,
+    el veredicto empieza con el porcentaje y la app lo muestra en rojo antes y
+    después de analizar.
+39. El mapa local deja en NaN las teselas con zona vacía en vez de evaluarlas.
+40. El JSON incluye un bloque `analysis` con región, fracción de NaN, fracción de
+    zona vacía, normalización, nulo (método, n, semilla), descriptores activos y
+    extensión. Antes la semilla no llegaba al JSON (el punto 24 lo daba por hecho).

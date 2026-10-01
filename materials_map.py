@@ -19,6 +19,8 @@ FAMILIES = {
 }
 
 STATE_TEXT = {
+    "invalid_region": "Región NO VÁLIDA: contiene píxeles vacíos (borde del mosaico) rellenados con la mediana. El escalón "
+                      "artificial pasa el test como si fuera estructura. Repite con una región sin vacíos.",
     "reject": "Rechazado para descubrimiento: procedencia insuficiente.",
     "exploratory_only": "Producto de detector (uncal/rate). Exploratorio, no ciencia usable.",
     "known_or_weak": "Campo usable, pero ningún descriptor sobrevive al FDR. Estructura típica o test insuficiente. No es candidato.",
@@ -157,7 +159,8 @@ def decide_state(provenance=None, fdr_pass=None, product_level=None, family_key=
     return "known_or_weak"
 
 
-def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, provenance=None, metadata=None):
+def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, provenance=None, metadata=None,
+              empty_fraction=None, max_empty_fraction=0.001):
     scores, coverage = family_scores(plugin_results, structure_z, return_coverage=True)
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
     top_key, top_p = ranked[0]
@@ -178,10 +181,15 @@ def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, prove
     if artifact and lattice_evidence:
         is_candidate = False
         state = "known_or_weak"
+    region_invalid = empty_fraction is not None and empty_fraction > max_empty_fraction
+    if region_invalid and state not in ("reject", "exploratory_only"):
+        state, is_candidate = "invalid_region", False
     meta = FAMILIES.get(top_key, FAMILIES["mixed"])
     verdict = STATE_TEXT[state]
     if mixed:
         verdict = "Empate de familias (%s vs %s, margen=%.3f). " % (ranked[0][0], second_key, margin) + verdict
+    if region_invalid:                                   # primero: invalida todo lo demas
+        verdict = "%.1f %% de la región es zona vacía. " % (100 * empty_fraction) + verdict
     warn_reason = instrument_warning_reason(plugin_results, metadata)
     return {
         "dominant_family": top_key,
@@ -202,4 +210,5 @@ def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, prove
         "verdict": verdict,
         "fdr_pass": fdr_pass,
         "p_value": p_value,
+        "empty_fraction": empty_fraction,
     }

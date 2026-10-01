@@ -219,3 +219,24 @@ vacío rellenado con la mediana: al menos el 12 % de la región no tenía dato.
 40. El JSON incluye un bloque `analysis` con región, fracción de NaN, fracción de
     zona vacía, normalización, nulo (método, n, semilla), descriptores activos y
     extensión. Antes la semilla no llegaba al JSON (el punto 24 lo daba por hecho).
+
+## Memoria (la app se caía en Streamlit Cloud tras el punto 37)
+
+Pico de memoria del proceso de Streamlit con un FITS de 4236×4214 (68 MB),
+región por defecto y análisis completo:
+
+| Versión | Pico |
+| --- | --- |
+| Antes de los puntos 35–40 | 632 MB |
+| Con los puntos 35–40 | 906 MB |
+| Con estos cambios | 638 MB |
+
+41. La búsqueda de la región limpia trabajaba a resolución completa (pico de
+    534 MB, imagen integral int64). Ahora usa `HoleMap`: bloques f×f con
+    mapa ≤ 1024 px de lado, imagen integral int32 y dilatación de 1 bloque para no
+    dejar borde parcial dentro. Pico: 30 MB. El cuadrado sigue sin ningún píxel
+    de zona vacía (tests con mosaicos de 400 a 4236 px).
+42. La región por defecto vuelve a tener como máximo 1024 px (ahora centrada
+    en la zona limpia). Con 2025 px, `kolmogorov_1941` sumaba 239 MB.
+43. `list_image_hdus` lee el tamaño de la cabecera (NAXISn) en lugar de cargar
+    los datos de cada extensión (+135 MB con 4200 px).

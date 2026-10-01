@@ -1,9 +1,9 @@
-from scoring import fdr_decision, benjamini_hochberg
+from scoring import fdr_decision, benjamini_hochberg, FDR_SCOPE
 
 def test_fdr_scope_and_floor_note():
-    p = {"aniso": 0.0769, "flatness": 0.0769, "entropy": 0.0769, "energy_mean": 0.0769}
+    p = {k: 0.0769 for k in FDR_SCOPE}
     d = fdr_decision(p, alpha=0.05)
-    assert d["scope"] == ["aniso", "flatness", "entropy", "energy_mean"]
+    assert d["scope"] == list(FDR_SCOPE)
     assert d["fdr_pass"] is False
     assert d["n_passed"] == 0
 

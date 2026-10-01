@@ -7,6 +7,7 @@ from .renormalization_group import RenormalizationGroup
 from .anisotropy import calculate_anisotropy
 from .entropy import calculate_entropy
 from .periodicity import analyze_periodicity
+from .ridges import analyze_ridges
 from .fibonacci import analyze_fibonacci
 
-__all__ = ["FractalBase", "Kolmogorov1941", "LyapunovStability", "PersistentHomology", "RenormalizationGroup", "calculate_anisotropy", "calculate_entropy", "analyze_periodicity", "analyze_fibonacci"]
+__all__ = ["FractalBase", "Kolmogorov1941", "LyapunovStability", "PersistentHomology", "RenormalizationGroup", "calculate_anisotropy", "calculate_entropy", "analyze_periodicity", "analyze_fibonacci", "analyze_ridges"]

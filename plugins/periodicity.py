@@ -6,6 +6,17 @@ instrumento (fringing CCD, spikes de difraccion, muestreo).
 
 Este plugin mide picos sobre el continuo radial del |FFT|^2 y avisa
 cuando los angulos caen en los ejes del detector.
+
+Umbral: en ruido, el exceso sobre el continuo sigue aprox. una exponencial de
+media 1, y el maximo de N valores crece como ln N (medido: mediana ~9 en campos
+gaussianos de 128-400 px, por encima del antiguo umbral fijo de 8). Ahora el
+umbral es ln(N / 0.01): Bonferroni al 1 % sobre los N pixeles independientes
+(la mitad del disco examinado, por la simetria del espectro de una imagen real).
+
+Rayas: una linea recta en la imagen deja en la FFT una raya de picos con el
+mismo angulo a frecuencias arbitrarias. Eso es un filamento, no una red. Un
+grupo de >= 3 picos con el mismo angulo cuyas frecuencias no son armonicos de
+la menor se marca como raya y no cuenta como periodicidad.
 """
 from __future__ import annotations
 
@@ -59,20 +70,17 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
     excess = spec / (continuum + 1e-12)
 
     mask = (r >= 3) & (r < r_max)
+    # Espectro de imagen real: simetrico, solo la mitad de los pixeles es independiente.
+    n_tested = max(1, int(mask.sum()) // 2)
+    thr = max(8.0, float(np.log(n_tested / 0.01)))
+    # Maximos locales 3x3 sobre TODOS los pixeles (antes se submuestreaba y un pico
+    # cuyo maximo caia en un pixel saltado se perdia: p. ej. una red girada).
+    from scipy.ndimage import maximum_filter
+    is_peak = mask & (excess >= thr) & (excess >= maximum_filter(excess, size=3, mode="nearest"))
     peaks: List[tuple] = []
-    step = max(1, min(h, w) // 128)
-    for i in range(2, h - 2, step):
-        for j in range(2, w - 2, step):
-            if not mask[i, j]:
-                continue
-            val = excess[i, j]
-            if val < 8.0:
-                continue
-            nb = excess[i - 1 : i + 2, j - 1 : j + 2]
-            if val >= nb.max():
-                ang = float(np.degrees(np.arctan2(i - cy, j - cx)) % 180.0)
-                freq = float(r[i, j])
-                peaks.append((val, freq, ang, i, j))
+    for i, j in zip(*np.nonzero(is_peak)):
+        ang = float(np.degrees(np.arctan2(i - cy, j - cx)) % 180.0)
+        peaks.append((float(excess[i, j]), float(r[i, j]), ang, int(i), int(j)))
 
     peaks.sort(reverse=True, key=lambda t: t[0])
     picked = []
@@ -80,14 +88,17 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
         if any(abs(p[1] - q[1]) < 2.0 and abs(((p[2] - q[2] + 90) % 180) - 90) < 8 for q in picked):
             continue
         picked.append(p)
-        if len(picked) >= n_peaks:
+        if len(picked) >= 3 * n_peaks:      # margen: una raya puede ocupar muchos picos
             break
+
+    picked, streaks = _split_streaks(picked)
+    picked = picked[:n_peaks]
 
     if picked:
         prominences = np.array([p[0] for p in picked])
         angles = np.array([p[2] for p in picked])
         freqs = np.array([p[1] for p in picked])
-        n_sig = int(np.sum(prominences >= 8.0))
+        n_sig = int(np.sum(prominences >= thr))
         raw = float(np.clip(np.log10(max(prominences[0], 1.0)) / 2.0, 0.0, 1.0))
         peak_score = raw if n_sig >= 2 else raw * 0.35
         axis_dist = np.minimum(angles % 90.0, 90.0 - (angles % 90.0))
@@ -102,7 +113,7 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
         axis_frac = 0.0
         lattice_hint = "ninguno"
 
-    likely_instrument = bool(n_sig >= 2 and axis_frac >= 0.6)
+    likely_instrument = bool(n_sig >= 1 and axis_frac >= 0.6)
 
     return {
         "n_peaks": int(len(picked)),
@@ -114,6 +125,10 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
         "axis_aligned_fraction": axis_frac,
         "lattice_hint": lattice_hint,
         "likely_instrument_artifact": likely_instrument,
+        "peak_threshold": thr,
+        "n_tested_pixels": n_tested,
+        "streak_angles_deg": [float(a) for a in streaks],
+        "n_streaks": int(len(streaks)),
         "complexity_score": float(peak_score),
         "note": (
             "Picos alineados al detector: probable fringing/spikes/muestreo."
@@ -121,6 +136,33 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
             else "Picos sobre el continuo radial del espectro 2D."
         ),
     }
+
+
+def _is_harmonic(freqs, tol=0.12):
+    f = np.sort(np.asarray(freqs, dtype=float))
+    ratio = f / f[0]
+    return bool(np.all(np.abs(ratio - np.round(ratio)) <= tol * np.round(ratio)))
+
+
+def _split_streaks(picked, ang_tol=6.0, min_peaks=3):
+    """Separa rayas (lineas rectas en la imagen) de picos discretos.
+    Devuelve (picos que quedan, angulos de las rayas)."""
+    groups: List[List[tuple]] = []
+    for p in picked:
+        for g in groups:
+            if abs(((p[2] - g[0][2] + 90) % 180) - 90) < ang_tol:
+                g.append(p)
+                break
+        else:
+            groups.append([p])
+    keep, streaks = [], []
+    for g in groups:
+        if len(g) >= min_peaks and not _is_harmonic([q[1] for q in g]):
+            streaks.append(float(np.median([q[2] for q in g])))
+        else:
+            keep.extend(g)
+    keep.sort(reverse=True, key=lambda t: t[0])
+    return keep, streaks
 
 
 def _lattice_hint(angles: np.ndarray) -> str:

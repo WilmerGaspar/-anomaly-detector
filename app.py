@@ -130,7 +130,8 @@ def parse_field(raw, name, hdu_index=None):
             meta = {"filename": name, "format": "FITS", "is_fits": True, "hdu": "%s[%d]" % (hdu.name or "PRIMARY", hdu_index),
                     "telescope": hk("TELESCOP"), "instrument": hk("INSTRUME"), "filter": hk("FILTER", "FILTER1", "FILTER2"),
                     "target_header": hk("TARGNAME", "TARGPROP", "OBJECT"), "date_obs": hk("DATE-OBS", "DATE-BEG"),
-                    "program": hk("PROGRAM", "PROPOSID"), "bunit": hk("BUNIT")}
+                    "program": hk("PROGRAM", "PROPOSID"), "bunit": hk("BUNIT"),
+                    "exp_type": hk("EXP_TYPE")}
     else:
         from PIL import Image
         im = Image.open(io.BytesIO(raw))
@@ -487,9 +488,9 @@ left.image(preview_with_box(data, y0, x0, side), caption="Imagen completa (%dx%d
 right.image(crop, caption="Región: x=%d–%d, y=%d–%d" % (x0, x0 + side, y0, y0 + side), use_container_width=True, clamp=True)
 right.markdown(
     "<div class='cms-prov'>Telescopio / instrumento: %s / %s<br>Filtro: %s<br>Objeto (cabecera): %s<br>"
-    "Fecha (cabecera): %s<br>Programa (cabecera): %s<br>Extensión: %s<br>Unidades: %s</div>"
+    "Fecha (cabecera): %s<br>Programa (cabecera): %s<br>Tipo de exposición: %s<br>Extensión: %s<br>Unidades: %s</div>"
     % (meta.get("telescope") or "—", meta.get("instrument") or "—", meta.get("filter") or "—", meta.get("target_header") or "—",
-       meta.get("date_obs") or "—", meta.get("program") or "—", meta.get("hdu") or "—", meta.get("bunit") or "—"),
+       meta.get("date_obs") or "—", meta.get("program") or "—", meta.get("exp_type") or "—", meta.get("hdu") or "—", meta.get("bunit") or "—"),
     unsafe_allow_html=True)
 if hole_frac > MAX_EMPTY_FRACTION:
     st.error("%.1f%% de la región son zonas vacías (borde del mosaico). Se rellenan con la mediana y eso crea bordes "

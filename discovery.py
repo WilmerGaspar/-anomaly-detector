@@ -46,6 +46,7 @@ def _fill_smooth_plus_noise(lin, masked, rng, sigma=4.0):
     return out
 
 
+MAX_MASK_FRACTION = 0.10
 MASK_NSIG = 5.0     # medido: a 10 sigma quedaban estrellas debiles que mantenian el FDR (1 de 4 campos)
 
 
@@ -59,22 +60,31 @@ def mask_point_sources(raw, seed=0, max_radius=25, nsig=MASK_NSIG, spike_pixels=
     h, w = lin.shape
     masked = np.zeros(lin.shape, dtype=bool)
     radii = []
+    n_extended = 0
     if len(src):
-        bg = float(np.median(lin))
-        noise = 1.4826 * float(np.median(np.abs(lin - bg))) or float(lin.std()) or 1.0
+        from plugins.ridges import local_background
+        resid = lin - local_background(lin)
+        noise = 1.4826 * float(np.median(np.abs(resid - np.median(resid)))) or float(resid.std()) or 1.0
         yy, xx = np.mgrid[:h, :w]
+        keep = []
         for y, x in src:
             r = 2
             while r < max_radius:
                 y0, y1, x0, x1 = max(0, y - r - 1), y + r + 2, max(0, x - r - 1), x + r + 2
                 ring = np.abs(np.hypot(yy[y0:y1, x0:x1] - y, xx[y0:y1, x0:x1] - x) - r) < 0.75
-                vals = lin[y0:y1, x0:x1][ring]
-                if vals.size and np.median(vals) <= bg + 3 * noise:
+                vals = resid[y0:y1, x0:x1][ring]
+                if vals.size and np.median(vals) <= 3 * noise:
                     break
                 r += 1
+            if r >= max_radius:
+                # El perfil no baja al fondo local: es emision extendida, no una fuente puntual.
+                n_extended += 1
+                continue
+            keep.append((y, x))
             r = int(np.ceil(1.5 * r))             # margen para alas de la PSF
             radii.append(r)
             masked |= (yy - y) ** 2 + (xx - x) ** 2 <= r * r
+        src = np.array(keep).reshape(-1, 2)
     n_spike_px = 0
     if spike_pixels and small_shape:
         sy, sx = h / small_shape[0], w / small_shape[1]
@@ -86,8 +96,12 @@ def mask_point_sources(raw, seed=0, max_radius=25, nsig=MASK_NSIG, spike_pixels=
         n_spike_px = int(sk.sum())
         masked |= sk
     out = _fill_smooth_plus_noise(lin, masked, rng) if masked.any() else lin.copy()
-    return out, {"n_masked": int(len(src)), "masked_fraction": float(masked.mean()), "radii": radii,
-                 "spike_area_fraction": n_spike_px / masked.size, "nsig": nsig}
+    frac = float(masked.mean())
+    return out, {"n_masked": int(len(src)), "n_extended_rejected": int(n_extended), "masked_fraction": frac,
+                 "radii": radii, "spike_area_fraction": n_spike_px / masked.size, "nsig": nsig,
+                 # Rellenar mas del 10 % de la imagen fabrica estructura (medido: emision extendida
+                 # sin estrellas pasaba de FDR 0/4 a 3-4/4 con 17-24 % enmascarado).
+                 "valid": frac <= MAX_MASK_FRACTION}
 
 
 def stretch01(a, lo=2, hi=98):
@@ -103,6 +117,7 @@ def fdr_without_point_sources(raw, n_simulations=99, seed=81, spike_pixels=None,
     filled, info = mask_point_sources(raw, seed=seed, spike_pixels=spike_pixels, small_shape=small_shape)
     det = cheap_descriptor_null_details(stretch01(filled), n_simulations=n_simulations, seed=seed)
     fdr = fdr_decision({k: d["p"] for k, d in det.items()}, n_simulations=n_simulations)
+    info = {k: v for k, v in info.items() if k != "radii"}
     return {"fdr_pass": bool(fdr["fdr_pass"]), "n_passed": int(fdr["n_passed"]), "p_values": fdr["p_values"],
             "passed_descriptors": fdr["passed_descriptors"], **info}
 
@@ -216,7 +231,12 @@ def evaluate(card, masked=None, replicate=None, references=None):
 
     n_src = morph.get("n_point_sources") or 0
     n_spk = rid.get("n_spike_components") or 0
-    if masked is not None:
+    if masked is not None and not masked.get("valid", True):
+        msg = ("prueba no válida: habría que enmascarar el %.0f %% del área (máximo %.0f %%); no comprobado"
+               % (100 * masked["masked_fraction"], 100 * MAX_MASK_FRACTION))
+        add("No la explican las fuentes puntuales", False, msg)
+        add("No la explican los picos de difracción", n_spk == 0, msg if n_spk else "sin picos de difracción")
+    elif masked is not None:
         survives = masked["fdr_pass"] or ridge_pass
         n_m = masked.get("n_masked", 0)
         detail = "%d fuentes (≥ %.0fσ) y sus picos enmascarados (%.1f %% del área) → FDR %d/4%s" % (

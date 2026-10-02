@@ -56,17 +56,69 @@ def compact_sources(img, null_imgs, sigmas=(1.0, 2.0, 3.0)):
     return np.stack([ys, xs], axis=1), thr
 
 
-def compact_sources_linear(lin, sigmas=(1.0, 2.0), nsig=10.0):
+def local_background(lin, box=32):
+    """Fondo local: mediana en bloques box x box, interpolada a resolucion completa.
+    Sin esto, en una imagen con emision extendida brillante cualquier zona del grumo
+    supera fondo_global + N ruido y se toma por fuente (medido en MIRI: 1163 'fuentes')."""
+    from scipy.ndimage import zoom
+    h, w = lin.shape
+    nb_y, nb_x = max(1, h // box), max(1, w // box)
+    crop = lin[: nb_y * box, : nb_x * box] if (h >= box and w >= box) else lin
+    if h < box or w < box:
+        return np.full_like(lin, np.median(lin))
+    med = np.median(crop.reshape(nb_y, box, nb_x, box).transpose(0, 2, 1, 3).reshape(nb_y, nb_x, -1), axis=2)
+    bg = zoom(med, (h / nb_y, w / nb_x), order=1)
+    out = np.empty_like(lin)
+    out[: bg.shape[0], : bg.shape[1]] = bg[:h, :w]
+    if bg.shape[0] < h:
+        out[bg.shape[0]:, :] = out[bg.shape[0] - 1, :]
+    if bg.shape[1] < w:
+        out[:, bg.shape[1]:] = out[:, bg.shape[1] - 1:bg.shape[1]]
+    return out
+
+
+def _concentration(resid, y, x, scales=(1.0, 1.5, 2.0, 3.0, 4.0)):
+    """Max sobre escalas s de (media en r <= 2s - pedestal) / (media en 2s < r <= 4s - pedestal),
+    con pedestal = mediana en 4s < r <= 6s. Gaussiana de anchura s: ~20. Grumo mucho mas ancho
+    que s (perfil ~ 1 - r^2/2S^2): ~1.5. Con sumas en vez de medias y sin pedestal, el fondo
+    del anillo se comia el contraste y estrellas de 50-90 sigma daban ~2 (se perdian)."""
+    h, w = resid.shape
+    best = 0.0
+    for s in scales:
+        R = int(np.ceil(6 * s)) + 1
+        y0, y1, x0, x1 = max(0, y - R), min(h, y + R + 1), max(0, x - R), min(w, x + R + 1)
+        sub = resid[y0:y1, x0:x1]
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        r = np.hypot(yy - y, xx - x)
+        ped_px = sub[(r > 4 * s) & (r <= 6 * s)]
+        inner_px = sub[r <= 2 * s]
+        ring_px = sub[(r > 2 * s) & (r <= 4 * s)]
+        if not (ped_px.size and inner_px.size and ring_px.size):
+            continue
+        ped = float(np.median(ped_px))
+        inner = float(inner_px.mean()) - ped
+        ring = float(ring_px.mean()) - ped
+        if inner > 0:
+            best = max(best, inner / max(ring, 1e-3 * inner))
+    return best
+
+
+POINT_CONCENTRATION = 5.0   # gaussiana con su propia escala: ~20; grumo extendido: ~1.5
+
+
+def compact_sources_linear(lin, sigmas=(1.0, 2.0, 3.0), nsig=10.0, box=32, min_concentration=POINT_CONCENTRATION):
     """Fuentes puntuales en valores lineales: maximo local redondo (l2/l1 >= 0.5) cuyo pico
-    supera el fondo en `nsig` veces el ruido (MAD). Los subrogados no sirven aqui como umbral:
-    conservan los pixeles brillantes de las estrellas y, repartidos, parecen fuentes."""
+    supera el FONDO LOCAL en `nsig` veces el ruido (MAD del residuo) y cuya luz esta
+    concentrada como la de una PSF (_concentration). Los subrogados no sirven aqui como
+    umbral: conservan los pixeles brillantes de las estrellas."""
     from scipy.ndimage import maximum_filter
+    resid = lin - local_background(lin, box=box)
     b = np.max([_blobness(lin, s) for s in sigmas], axis=0)
-    bg = float(np.median(lin))
-    noise = 1.4826 * float(np.median(np.abs(lin - bg))) or float(lin.std()) or 1.0
-    peaks = (b > 0) & (b >= maximum_filter(b, size=5)) & (maximum_filter(lin, size=3) - bg > nsig * noise)
+    noise = 1.4826 * float(np.median(np.abs(resid - np.median(resid)))) or float(resid.std()) or 1.0
+    peaks = (b > 0) & (b >= maximum_filter(b, size=5)) & (maximum_filter(resid, size=3) > nsig * noise)
     ys, xs = np.nonzero(peaks)
-    return np.stack([ys, xs], axis=1), nsig * noise
+    keep = [(y, x) for y, x in zip(ys, xs) if _concentration(resid, int(y), int(x)) >= min_concentration]
+    return np.array(keep, dtype=int).reshape(-1, 2), nsig * noise
 
 
 def _strength(img, sigmas):

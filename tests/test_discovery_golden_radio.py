@@ -46,19 +46,27 @@ def _card(**over):
     return card
 
 
+REP = {"fdr_pass": True, "n_passed": 3, "seed": 1}
+MASK_OK = {"fdr_pass": True, "n_passed": 3, "n_masked": 0, "masked_fraction": 0.0}
+
+
 def test_untested_controls_never_count_in_favour():
-    g = evaluate(_card(morphology={"n_point_sources": 93}))
-    assert g["level"] == "unconfirmed"
+    assert evaluate(_card(morphology={"n_point_sources": 93}))["level"] == "unconfirmed"
+    # Sin la prueba de enmascarado no hay verde, aunque el detector a 10 sigma no vea fuentes.
+    assert evaluate(_card(), replicate=REP)["level"] == "unconfirmed"
 
 
 def test_levels():
-    rep = {"fdr_pass": True, "n_passed": 3, "seed": 1}
-    assert evaluate(_card(), replicate=rep)["level"] == "robust"
-    assert evaluate(_card(analysis={"empty_area_fraction": 0.2}), replicate=rep)["level"] == "invalid"
+    assert evaluate(_card(), masked=MASK_OK, replicate=REP)["level"] == "robust"
+    assert evaluate(_card(analysis={"empty_area_fraction": 0.2}), masked=MASK_OK, replicate=REP)["level"] == "invalid"
     masked_fail = {"fdr_pass": False, "n_passed": 0, "n_masked": 93, "masked_fraction": 0.02}
-    assert evaluate(_card(morphology={"n_point_sources": 93}), masked=masked_fail, replicate=rep)["level"] == "explained"
+    assert evaluate(_card(morphology={"n_point_sources": 93}), masked=masked_fail, replicate=REP)["level"] == "explained"
+    spikes = _card(descriptors={"ridges": {"filament_excess": 0.0, "n_spike_components": 2}},
+                   morphology={"n_point_sources": 1})
+    assert evaluate(spikes, masked=dict(masked_fail, n_masked=1), replicate=REP)["level"] == "explained"
+    assert evaluate(spikes, masked=dict(MASK_OK, n_masked=1), replicate=REP)["level"] == "robust"
     none = _card(structure_test={"fdr": {"fdr_pass": False, "n_passed": 0, "n_tested": 4}})
-    assert evaluate(none, replicate=rep)["level"] == "none"
+    assert evaluate(none, masked=MASK_OK, replicate=REP)["level"] == "none"
 
 
 def test_novelty_needs_references_and_flags_outlier():
@@ -67,8 +75,28 @@ def test_novelty_needs_references_and_flags_outlier():
     odd = _card(descriptors={"fractal_base": {"d0": 1.2}})
     nv = novelty_vs_references(odd, refs)
     assert nv["available"] and nv["max_abs_z"] > 5
-    rep = {"fdr_pass": True, "n_passed": 3, "seed": 1}
-    assert evaluate(odd, replicate=rep, references=refs)["level"] == "pioneer"
+    assert evaluate(odd, masked=MASK_OK, replicate=REP, references=refs)["level"] == "pioneer"
+
+
+def _one_star(n, cy, cx, amp=400, spike_amp=40, length=120, sig=2.5):
+    yy, xx = np.mgrid[:n, :n]
+    r = np.hypot(xx - cx, yy - cy)
+    g = amp * np.exp(-r ** 2 / (2 * sig ** 2))
+    for ang in np.deg2rad([113, 173, 53]):
+        d = np.abs(np.cos(ang) * (xx - cx) + np.sin(ang) * (yy - cy))
+        g = g + spike_amp * np.exp(-d ** 2 / 2) * np.exp(-r / length)
+    return g
+
+
+@pytest.mark.parametrize("seed", [0, 3])
+def test_single_bright_star_with_spikes_is_explained(seed):
+    from discovery import stretch01
+    from plugins.ridges import analyze_ridges
+    img = _field(600, 3.0, seed) + _one_star(600, 180, 420)
+    rid = analyze_ridges(stretch01(img), raw=img)
+    assert rid["n_spike_components"] >= 1
+    m = fdr_without_point_sources(img, spike_pixels=rid["spike_pixels"], small_shape=rid["small_shape"])
+    assert m["n_passed"] == 0 and m["masked_fraction"] < 0.08     # bandas finas, no discos
 
 
 # ---------------------------------------------------------------- ventana phi

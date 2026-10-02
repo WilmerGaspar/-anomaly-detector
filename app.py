@@ -567,8 +567,11 @@ if st.button("Analizar", type="primary"):
         from golden import golden_window
         with st.spinner("Controles: otra semilla, fuentes puntuales enmascaradas y ventana φ…"):
             replicate = fdr_replicate(crop, n_simulations=n_null, seed=SEED + 1000)
-            n_src = (results.get("ridges") or {}).get("n_compact_sources") or 0
-            masked = fdr_without_point_sources(crop_raw, n_simulations=n_null, seed=SEED + 2000) if n_src >= 3 else None
+            rid = results.get("ridges") or {}
+            # Siempre: estrellas debiles (por debajo del umbral del aviso, 10 sigma) tambien
+            # disparan la curtosis de incrementos; la prueba enmascara desde 5 sigma.
+            masked = fdr_without_point_sources(crop_raw, n_simulations=n_null, seed=SEED + 2000,
+                                               spike_pixels=rid.get("spike_pixels"), small_shape=rid.get("small_shape"))
             golden = golden_window(crop, find_point_sources(crop_raw)[0], seed=SEED)
         gate = evaluate(cand, masked=masked, replicate=replicate)
         cand["discovery_gate"] = {k: v for k, v in gate.items() if k != "novelty"}

@@ -257,3 +257,38 @@ Un análisis de `jw01192008001_02120_00001_nrs1_cal.fits` (NIRSpec, F110W) sali�
     como "imagen 2D analizable". Ahora no lo son, y la nota dice "plano de
     espectrógrafo o adquisición (no imagen del cielo)". Siguen visibles
     desactivando el filtro.
+
+## Fuentes puntuales y picos de difracción (resultado real de MIRI F2100W)
+
+`jw01192-o006_t013_miri_f2100w_i2d` (región limpia, 4/4 descriptores en el FDR)
+salió `needs_spectrum` con `filament` primera. Pero las crestas estaban a nivel
+de ruido (exceso 0.0017): `filament` ganaba solo por una "raya" en la FFT (113°),
+compatible con un pico de difracción. Además: β0 = 14, β1 = 0 (manchas sueltas,
+sin red) y curtosis k62 = 896, lo típico de fuentes puntuales.
+
+47. **Medido:** ruido solo → 0 descriptores en el FDR (6/6 campos); el mismo ruido
+    con 14 fuentes puntuales → de 1 a 4. Las fuentes puntuales bastan para pasar
+    el FDR.
+48. **Las rayas de la FFT ya no dan puntos a `filament`.** Un solo pico de
+    difracción bastaba para que ganara.
+49. **`ridges` separa los picos de difracción:** son crestas que salen
+    radialmente (≥ 60 % del esqueleto en ≤ 8 direcciones de 5°) de una fuente
+    puntual al menos 5 veces más brillante que la cresta, en valores lineales.
+    La app pasa la región sin estirar (`raw`), porque al recortar a [0, 1] una
+    estrella brillante satura y se funde con sus picos. Medido en 30 campos:
+    filamentos (rectos, curvos, cruzados, con estrellas encima) 0.011–0.030;
+    ruido, redes, manchas y estrellas con picos ≤ 0.0006.
+50. **Fuentes puntuales (`compact_sources_linear`):** máximo local redondo
+    (l2/l1 ≥ 0.5) más de 10 veces el ruido (MAD) sobre el fondo. Detecta 0 en
+    ruido, filamentos, redes y manchas extensas (12 campos) y de 4 a 11 en
+    campos de estrellas. Con 3 o más fuentes y FDR que pasa, el veredicto y la
+    app avisan de que el FDR puede deberse a ellas.
+51. **`periodicity`: picos sueltos a radios distintos no son una red.** Dos
+    filamentos rectos dejaban picos en dos direcciones (radios 115 y 81) que
+    contaban como `lattice`. Ahora hace falta la misma frecuencia en direcciones
+    distintas, o armónicos en una (`lattice_consistent`).
+
+Resultado en los controles: `filament` en 12/12 campos con filamentos, `lattice`
+en 3/3 redes, y ningún campo de estrellas sale `filament`. No hay una familia
+para "campo de fuentes puntuales": esos campos quedan en cascade/aggregate con
+el aviso.

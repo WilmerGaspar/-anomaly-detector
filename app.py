@@ -55,7 +55,8 @@ with st.sidebar:
     active = [k for k, v in plugins.items() if v]
 
 
-def run_plugins(image, active):
+def run_plugins(image, active, raw=None):
+    """`raw`: la region sin estirar; solo la usa `ridges` para separar picos de difraccion."""
     out = {}
     class_steps = [("fractal_base", "plugins.fractal_base", "FractalBase"), ("kolmogorov_1941", "plugins.kolmogorov_1941", "Kolmogorov1941"),
                    ("lyapunov_stability", "plugins.lyapunov_stability", "LyapunovStability"), ("persistent_homology", "plugins.persistent_homology", "PersistentHomology"),
@@ -75,7 +76,7 @@ def run_plugins(image, active):
         if key in active:
             try:
                 m = __import__(mod, fromlist=[fn])
-                out[key] = getattr(m, fn)(image)
+                out[key] = getattr(m, fn)(image, raw=raw) if key == "ridges" else getattr(m, fn)(image)
             except Exception as exc:
                 out[key] = {"error": str(exc)}
     return out
@@ -540,7 +541,7 @@ if st.button("Analizar", type="primary"):
         src = source.get("download_url") or source.get("uri") or source.get("archive", "")
         prov = assess_provenance(str(name), meta_full, src)
         with st.spinner("Calculando descriptores y %d subrogados…" % n_null):
-            results = run_plugins(crop, active)
+            results = run_plugins(crop, active, raw=crop_raw)
             mc = surrogate_null_test(crop, None, cheap_score_from_image, n_simulations=n_null, seed=SEED)
             details = cheap_descriptor_null_details(crop, n_simulations=n_null, seed=SEED + 1)
             fdr = fdr_decision({k: d["p"] for k, d in details.items()}, n_simulations=n_null)

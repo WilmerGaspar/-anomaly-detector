@@ -187,6 +187,9 @@ def _tab_families(R):
                    % (fam[order[0]] - fam[order[1]]))
     rid = R["results"].get("ridges") or {}
     per = R["results"].get("periodicity") or {}
+    if rid.get("n_spike_components"):
+        st.caption("Crestas descartadas como picos de difracción (salen radialmente de una fuente puntual mucho más "
+                   "brillante): %d componentes, %.2f %% de la región." % (rid["n_spike_components"], 100 * rid.get("spike_fraction", 0)))
     if "filament_excess" in rid:
         st.caption("Crestas largas: %.2f %% de la región frente a %.2f %% en subrogados IAAFT (exceso %.4f; en controles "
                    "sintéticos el ruido da ≤ 0.001 y los filamentos 0.011–0.030). Rayas en la FFT (líneas rectas): %d."
@@ -245,6 +248,11 @@ def render_results(R, crop, name, x0, y0, side, n_null):
     k6.metric("Procedencia", "%s" % prov.get("verdict"), "%.2f" % float(prov.get("trust_score") or 0), delta_color="off")
     if fdr.get("can_pass") is False:
         st.warning("Con %d subrogados el FDR no puede pasar: sube el número en ajustes avanzados." % n_null)
+    if mat.get("point_source_warning"):
+        st.warning("**%d fuentes puntuales** en la región (estrellas o galaxias no resueltas). Medido con imágenes "
+                   "simuladas: solo ruido → 0 descriptores pasan el FDR; el mismo ruido con 14 fuentes puntuales → de 1 a 4. "
+                   "Un FDR que pasa aquí puede deberse a las fuentes, no a estructura extendida (nube, filamento). "
+                   "Mira el Mapa local: si la señal se concentra en pocas teselas, son las fuentes." % mat["n_point_sources"])
     if mat.get("instrument_warning_reason"):
         st.warning("Aviso de instrumento: %s" % mat["instrument_warning_reason"])
 

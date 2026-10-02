@@ -100,7 +100,8 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
         freqs = np.array([p[1] for p in picked])
         n_sig = int(np.sum(prominences >= thr))
         raw = float(np.clip(np.log10(max(prominences[0], 1.0)) / 2.0, 0.0, 1.0))
-        peak_score = raw if n_sig >= 2 else raw * 0.35
+        lattice_like = _lattice_consistent(freqs[prominences >= thr], angles[prominences >= thr])
+        peak_score = raw if (n_sig >= 2 and lattice_like) else raw * 0.35
         axis_dist = np.minimum(angles % 90.0, 90.0 - (angles % 90.0))
         axis_frac = float(np.mean(axis_dist < 8.0)) if len(angles) else 0.0
         lattice_hint = _lattice_hint(angles)
@@ -112,6 +113,7 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
         n_sig = 0
         axis_frac = 0.0
         lattice_hint = "ninguno"
+        lattice_like = False
 
     likely_instrument = bool(n_sig >= 1 and axis_frac >= 0.6)
 
@@ -125,6 +127,7 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
         "axis_aligned_fraction": axis_frac,
         "lattice_hint": lattice_hint,
         "likely_instrument_artifact": likely_instrument,
+        "lattice_consistent": bool(picked) and bool(lattice_like),
         "peak_threshold": thr,
         "n_tested_pixels": n_tested,
         "streak_angles_deg": [float(a) for a in streaks],
@@ -136,6 +139,20 @@ def analyze_periodicity(image: np.ndarray, n_peaks: int = 8) -> Dict:
             else "Picos sobre el continuo radial del espectro 2D."
         ),
     }
+
+
+def _lattice_consistent(freqs, angles, rel_tol=0.1, min_sep_deg=15.0):
+    """Una red real deja picos a la MISMA frecuencia en direcciones distintas (o armonicos
+    en una). Picos sueltos a radios distintos (p. ej. filamentos rectos) no son una red."""
+    f, a = np.asarray(freqs, dtype=float), np.asarray(angles, dtype=float)
+    for i in range(len(f)):
+        for j in range(i + 1, len(f)):
+            sep = abs(((a[i] - a[j] + 90) % 180) - 90)
+            if sep >= min_sep_deg and abs(f[i] - f[j]) <= rel_tol * max(f[i], f[j]):
+                return True
+            if sep < min_sep_deg and _is_harmonic([f[i], f[j]]):
+                return True
+    return False
 
 
 def _is_harmonic(freqs, tol=0.12):

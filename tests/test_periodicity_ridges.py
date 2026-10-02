@@ -118,3 +118,59 @@ def test_local_map_skips_tiles_with_empty_pixels():
     valid[:20, :20] = False
     z = np.array(local_significance_map(img, grid=2, n_surrogates=3, seed=0, valid=valid)["z"])
     assert np.isnan(z[0, 0]) and np.all(np.isfinite(z.ravel()[1:]))
+
+
+def _stars(seed, spikes=True, n_src=14):
+    rng = np.random.default_rng(seed)
+    g = 0.3 * _field(beta=3.3, seed=seed)
+    for _ in range(n_src):
+        cy, cx = rng.uniform(20, N - 20, 2)
+        g = g + rng.uniform(3, 30) * np.exp(-((YY - cy) ** 2 + (XX - cx) ** 2) / (2 * 2.0 ** 2))
+    if spikes:                                    # estrella brillante con picos de difraccion
+        cy, cx = N * 0.3, N * 0.7
+        r = np.hypot(XX - cx, YY - cy)
+        for ang in np.deg2rad([113, 173, 53]):
+            d = np.abs(np.cos(ang) * (XX - cx) + np.sin(ang) * (YY - cy))
+            g = g + 40 * np.exp(-d ** 2 / 2) * np.exp(-r / 60)
+        g = g + 400 * np.exp(-((YY - cy) ** 2 + (XX - cx) ** 2) / (2 * 2.5 ** 2))
+    return g
+
+
+def _plugins_raw(raw):
+    from plugins.anisotropy import calculate_anisotropy
+    img = _stretch(raw)
+    return {"periodicity": analyze_periodicity(img), "ridges": analyze_ridges(img, raw=raw),
+            "anisotropy": calculate_anisotropy(img)}
+
+
+@pytest.mark.parametrize("seed", [1, 2])
+def test_diffraction_spikes_are_not_filaments(seed):
+    raw = _stars(seed)
+    r = analyze_ridges(_stretch(raw), raw=raw)
+    assert r["filament_excess"] < 0.003 and r["n_spike_components"] >= 1
+    s = family_scores(_plugins_raw(raw), structure_z=3.0)
+    assert max(s, key=s.get) != "filament"
+
+
+@pytest.mark.parametrize("seed", [1, 2])
+def test_filaments_survive_bright_stars(seed):
+    raw = _lines(seed) + _stars(seed, spikes=False, n_src=8) - 0.3 * _field(beta=3.3, seed=seed)
+    assert analyze_ridges(_stretch(raw), raw=raw)["filament_excess"] > 0.006
+
+
+def test_point_sources_flagged_in_verdict():
+    from materials_map import interpret
+    raw = _stars(3, spikes=False)
+    res = {"ridges": analyze_ridges(_stretch(raw), raw=raw)}
+    assert res["ridges"]["n_compact_sources"] >= 5
+    v = interpret(res, 3.0, 0.01, fdr_pass=True, provenance={"verdict": "usable_science"})
+    assert v["point_source_warning"] and "fuentes puntuales" in v["verdict"]
+    noise = {"ridges": analyze_ridges(_stretch(_field(seed=3)), raw=_field(seed=3))}
+    assert not interpret(noise, 3.0, 0.01, fdr_pass=True, provenance={"verdict": "usable_science"})["point_source_warning"]
+
+
+def test_isolated_peaks_at_different_radii_are_not_a_lattice():
+    from plugins.periodicity import _lattice_consistent
+    assert not _lattice_consistent([114.6, 81.1], [9.5, 92.8])          # dos filamentos rectos
+    assert _lattice_consistent([34.0, 34.5], [17.0, 77.0])              # red: misma frecuencia
+    assert _lattice_consistent([34.0, 67.5], [17.0, 17.0])              # armonicos en una direccion

@@ -96,7 +96,7 @@ def _long_skeleton_fraction(mask, min_length, exclude=None):
 
 
 def analyze_ridges(image: np.ndarray, sigmas=(1.0, 2.0), n_surrogates: int = 3, seed: int = 0, max_side: int = 192,
-                   raw: np.ndarray = None, spike_ratio: float = 5.0) -> Dict:
+                   raw: np.ndarray = None, spike_ratio: float = 5.0, spike_decay: float = 1.3) -> Dict:
     """`raw`: la misma region SIN estirar ni recortar (valores lineales). Sirve para
     distinguir picos de difraccion (el nucleo de la estrella es >> que sus picos) de
     cruces de filamentos (el cruce es ~2x el filamento). Sin `raw` no se separan picos."""
@@ -134,6 +134,7 @@ def analyze_ridges(image: np.ndarray, sigmas=(1.0, 2.0), n_surrogates: int = 3, 
     else:
         src, src_thr = compact_sources(small, surrs)
     spike_lab = set()
+    spike_regions = {}                     # (y, x) de la fuente -> alcance maximo de sus picos (px de `small`)
     if lin is not None and len(src):
         bg = float(np.median(lin))
         lab = label(skeletonize(ridge_mask), connectivity=2)
@@ -153,8 +154,17 @@ def analyze_ridges(image: np.ndarray, sigmas=(1.0, 2.0), n_surrogates: int = 3, 
                     continue
                 ang = np.degrees(np.arctan2(yy[pix] - y, xx[pix] - x)) % 360
                 hist = np.sort(np.histogram(ang, bins=72, range=(0, 360))[0])[::-1]
-                if hist[:8].sum() >= 0.6 * hist.sum():          # pocos rayos: radial
+                # Un pico de difraccion se apaga al alejarse de la estrella; un filamento que
+                # pasa cerca mantiene su brillo (medido: sin esta prueba, 40 estrellas sobre
+                # filamentos hacian que los tramos cercanos se tomaran por picos y se taparan).
+                inner = pix & (r2 > radius ** 2) & (r2 <= (2 * radius) ** 2)
+                outer = pix & (r2 > (3 * radius) ** 2) & (r2 <= (6 * radius) ** 2)
+                decays = (not outer.any() or not inner.any() or
+                          float(np.median(lin[inner])) - bg >= spike_decay * max(float(np.median(lin[outer])) - bg, 1e-12))
+                if hist[:8].sum() >= 0.6 * hist.sum() and decays:     # pocos rayos, radial y se apaga
                     spike_lab.add(c)
+                    ext = float(np.sqrt(r2[pix].max()))
+                    spike_regions[(int(y), int(x))] = max(spike_regions.get((int(y), int(x)), 0.0), ext)
         near = np.isin(lab, list(spike_lab)) if spike_lab else np.zeros(small.shape, dtype=bool)
     else:
         near = np.zeros(small.shape, dtype=bool)
@@ -167,6 +177,13 @@ def analyze_ridges(image: np.ndarray, sigmas=(1.0, 2.0), n_surrogates: int = 3, 
         "filament_excess": float(f_obs - f_null),
         "n_compact_sources": int(len(src)),
         "n_spike_components": int(spike_src),
+        # Fuentes con picos de difraccion, en coordenadas de la imagen de entrada:
+        # (fila, columna, radio que cubre sus picos). discovery.py las enmascara.
+        "spike_regions": [[float(y * img.shape[0] / small.shape[0]), float(x * img.shape[1] / small.shape[1]),
+                           float(ext * img.shape[0] / small.shape[0])] for (y, x), ext in spike_regions.items()],
+        # Pixeles de esqueleto de los picos (coordenadas de `small`) para enmascararlos como bandas finas.
+        "spike_pixels": np.argwhere(near).tolist() if near.any() else [],
+        "small_shape": [int(small.shape[0]), int(small.shape[1])],
         "spike_fraction": float(f_spike),
         "threshold": thr,
         "min_length_px": float(min_length),

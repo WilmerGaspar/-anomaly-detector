@@ -352,3 +352,28 @@ puntuales por sí solas bastan para pasar el FDR (punto 47).
 60. Entradas: serie temporal (CSV/TXT/NPY/FITS), espectro dinámico canales×tiempo,
     espectrograma tiempo×canales. Los formatos de radiotelescopio (.fil, .h5)
     deben convertirse antes.
+
+## Prueba de enmascarado: una sola estrella y sus picos (MIRI F2100W real)
+
+`jw01192-o006_t013_miri_f2100w_i2d` (FDR 4/4, 1 fuente brillante, 2 picos de
+difracción) salió 🟡 sin haberlo demostrado: la prueba de enmascarar solo se hacía
+con ≥ 3 fuentes y los picos contaban como fallo solo por existir.
+
+61. La prueba de enmascarado se ejecuta **siempre**. Enmascara desde 5σ (a 10σ,
+    estrellas débiles mantenían el FDR en 1 de 4 campos de estrellas con picos).
+62. Los picos de difracción se tapan como **bandas finas** (±3 px) a lo largo de
+    su cresta. Primera versión descartada: discos que contenían los picos tapaban
+    el 60–95 % de la imagen.
+63. Relleno = interpolación suave desde los vecinos + ruido del nivel local. El
+    relleno con píxeles al azar rompía la correlación del fondo en zonas grandes.
+64. Un pico de difracción debe además **apagarse con la distancia** (brillo a
+    R–2R ≥ 1.3 × brillo a 3R–6R). Sin esto, tramos de filamento junto a estrellas
+    se tomaban por picos y se tapaban.
+65. El control de picos solo falla si la señal desaparece al taparlos.
+66. Resultado en 28 campos simulados (7 tipos × 4 semillas):
+    - ruido + estrellas (1 o 40) y estrellas con picos: la señal desaparece al
+      enmascarar en 12/12 → 🟡 con el motivo demostrado;
+    - ruido solo y filamentos solos: el enmascarado no cambia nada;
+    - filamentos + 1 estrella: la estructura sobrevive en 4/4;
+    - filamentos + 40 estrellas: se pierde en 1–2 de 4 (error prudente);
+    - ningún 🟢 falso.

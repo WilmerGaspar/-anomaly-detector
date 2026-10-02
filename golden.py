@@ -32,8 +32,12 @@ def golden_angle_test(points, n_perm=999, seed=0, min_points=10):
     th = np.arctan2(d[:, 0], d[:, 1])
 
     def stat(order):
+        # Media de cos(dtheta -+ angulo aureo): 1 si cada giro es 137.5 grados, ~0 al azar,
+        # negativo si los giros se concentran en otro angulo. La version anterior usaba
+        # |media de exp(i(dtheta - g))|, que vale lo mismo para CUALQUIER angulo concentrado
+        # (el desfase no cambia el modulo): puntos agrupados en una nube daban p = 0.001.
         dth = np.diff(th[order])
-        return max(abs(np.mean(np.exp(1j * (dth - s * np.deg2rad(GOLDEN_ANGLE))))) for s in (1, -1))
+        return max(float(np.mean(np.cos(dth - s * np.deg2rad(GOLDEN_ANGLE)))) for s in (1, -1))
 
     obs = stat(np.argsort(r))
     rng = np.random.default_rng(seed)
@@ -41,7 +45,8 @@ def golden_angle_test(points, n_perm=999, seed=0, min_points=10):
     p = float((1 + np.sum(null >= obs)) / (len(null) + 1))
     out.update({"statistic": float(obs), "null_mean": float(null.mean()), "null_q95": float(np.percentile(null, 95)),
                 "null": null.tolist(), "p": p, "alert": p < ALPHA,
-                "note": "Concentración (0-1) de los giros entre fuentes consecutivas alrededor de ±137.5°."})
+                "note": "Media de cos(giro − 137.5°) entre fuentes consecutivas por radio: 1 = filotaxis perfecta, "
+                        "≈ 0 = azar."})
     return out
 
 

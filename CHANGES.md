@@ -377,3 +377,29 @@ con ≥ 3 fuentes y los picos contaban como fallo solo por existir.
     - filamentos + 1 estrella: la estructura sobrevive en 4/4;
     - filamentos + 40 estrellas: se pierde en 1–2 de 4 (error prudente);
     - ningún 🟢 falso.
+
+## Falso 🟢 y falsa alerta φ en un MIRI F2550W real
+
+`jw01192006001_0310h_00003_mirimage_i2d` salió 🟢 "robusta" con alerta de ángulo
+áureo. Ambos eran falsos.
+
+67. **Bug matemático en el ángulo áureo.** Se usaba |media exp(i(Δθ − 137.5°))|,
+    cuyo módulo no depende del desfase: cualquier concentración de giros daba
+    alerta (puntos agrupados en una nube → p = 0.001). Ahora: media de cos(Δθ ∓
+    137.5°). Medido: nubes simuladas p = 0.87–1.0; espiral de Vogel sigue p ≤ 0.004.
+68. **"1163 fuentes puntuales" que eran emisión extendida** (radio en el tope,
+    38 px). Las fuentes se miden ahora frente al fondo local (mediana en bloques de
+    32 px) y deben tener la luz concentrada como una PSF: (media r ≤ 2s − pedestal)
+    / (media 2s–4s − pedestal) ≥ 5 en alguna escala s, con pedestal = mediana a
+    4s–6s. Gaussiana ≈ 20, grumo extendido ≈ 1.5. Estrellas: 30/30 y 40/40
+    detectadas; ruido: 0.
+69. Una fuente cuyo perfil no baja al fondo local no se enmascara (es extendida).
+70. **La prueba de enmascarado no es válida si cubre más del 10 % del área** → la
+    comprobación queda "no comprobado" (🟠 como máximo). Medido: con discos al azar
+    el relleno no fabrica estructura ni al 15 % (0/18 por tipo de campo), pero tapar
+    selectivamente los grumos brillantes de una emisión extendida sí: FDR 0/4 →
+    3–4/4. Sin un modelo de PSF del instrumento, un nudo compacto de polvo y una
+    fuente sin resolver no se distinguen; en esos campos la app dirá 🟠.
+71. Reproducción del caso (emisión log-normal ± 35 estrellas): antes 3–4/4 tras
+    enmascarar y alerta φ; ahora ⚪ y φ p ≈ 1. Los controles anteriores (28 campos)
+    no cambian: ningún 🟢 falso. Tests de regresión añadidos.

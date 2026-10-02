@@ -170,3 +170,37 @@ def test_period_uncertainty_is_honest_and_used_in_crossmatch():
     # Antes del afinado salia 0.7123 s (0.3 % de error): con el 0.2 % fijo no se encontraba.
     assert not rs.crossmatch_catalog(rows, period_s=0.7123)
     assert rs.crossmatch_catalog(rows, period_s=0.7123, period_err_s=0.0023)
+
+
+# ---------------------------------------------------------------- regresion: MIRI F2550W real (CHANGES 67-71)
+
+def test_golden_angle_ignores_clustered_points():
+    # Puntos agrupados en grumos: los giros entre vecinos se concentran cerca de 0 grados.
+    # El estadístico anterior (|media exp(i(dθ-g))|) daba p = 0.001 aquí.
+    rng = np.random.default_rng(1)
+    centers = rng.uniform(-200, 200, (12, 2))
+    pts = np.vstack([c + rng.normal(0, 6, (25, 2)) for c in centers])
+    assert golden_angle_test(pts, n_perm=499)["p"] > 0.05
+
+
+def _lognormal(seed, n=480):
+    g = _field(n, 3.0, seed)
+    return np.exp(1.2 * g) * 100 + 900 + np.random.default_rng(seed).normal(0, 5, (n, n))
+
+
+def test_extended_emission_cannot_make_green():
+    from discovery import MAX_MASK_FRACTION
+    img = _lognormal(1)
+    filled, info = mask_point_sources(img)
+    assert all(r < 38 for r in info["radii"])            # nada con el perfil sin cerrar
+    if info["masked_fraction"] > MAX_MASK_FRACTION:
+        assert not info["valid"]
+    card = _card(morphology={"n_point_sources": 50})
+    bad = {"fdr_pass": True, "n_passed": 4, "n_masked": 600, "masked_fraction": 0.25, "valid": False}
+    assert evaluate(card, masked=bad, replicate=REP)["level"] == "unconfirmed"
+
+
+def test_stars_detected_against_local_background():
+    from discovery import find_point_sources
+    assert len(find_point_sources(_stars_only(2), nsig=5)[0]) >= 28          # 30 reales
+    assert len(find_point_sources(_field(384, 3.0, 5), nsig=5)[0]) == 0      # ruido: ninguna

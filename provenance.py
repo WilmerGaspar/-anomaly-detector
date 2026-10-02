@@ -16,6 +16,15 @@ DETECTOR_LEVEL = (
 )
 SCIENCE_LEVEL = ("i2d", "_drz", "_drc", "x1d", "s3d", "_calints", "_cal.")
 SPEC_2D = ("nirspec", "nrs1", "nrs2", "niriss", "miri_lrs")
+# EXP_TYPE de JWST (cabecera). Espectroscopia: el plano 2D muestra trazas
+# espectrales, no la forma del objeto en el cielo.
+SPEC_EXP_TYPES = ("NRS_FIXEDSLIT", "NRS_MSASPEC", "NRS_IFU", "NRS_BRIGHTOBJ", "NRS_LAMP", "NRS_AUTOWAVE",
+                  "NRS_AUTOFLAT", "MIR_LRS-FIXEDSLIT", "MIR_LRS-SLITLESS", "MIR_MRS", "NIS_SOSS", "NIS_WFSS",
+                  "NRC_WFSS", "NRC_TSGRISM")
+# Imagenes de adquisicion / confirmacion: sirven para apuntar, no son ciencia.
+ACQ_EXP_TYPES = ("NRS_TACQ", "NRS_MSATA", "NRS_WATA", "NRS_TACONFIRM", "NRS_CONFIRM", "NRS_FOCUS",
+                 "NRS_MIMF", "NRS_VERIFY", "MIR_TACQ", "MIR_TACONFIRM", "NIS_TACQ", "NIS_TACONFIRM",
+                 "NRC_TACQ", "NRC_TACONFIRM")
 
 
 def _level(name: str) -> str:
@@ -69,10 +78,21 @@ def assess_provenance(filename, metadata=None, source_url=""):
         score = min(1.0, score + 0.1)
         reasons.append("Imagen calibrada (i2d/drz). Canal de morfologia.")
 
+    exp_type = str(meta.get("exp_type") or "").upper()
     inst_l = instrument.lower() + " " + name
-    if any(k in inst_l for k in SPEC_2D) and level not in {"spectrum_1d", "cube", "image_calibrated"}:
+    if exp_type in SPEC_EXP_TYPES:
         score = min(score, 0.5)
-        reasons.append("Plano 2D de espectrografo. Busca x1d o una imagen NIRCam/MIRI i2d.")
+        reasons.append("Plano 2D de espectrografo (EXP_TYPE=%s): las lineas son trazas espectrales, no forma en el "
+                       "cielo. Busca x1d o una imagen NIRCam/MIRI i2d." % exp_type)
+    elif exp_type in ACQ_EXP_TYPES:
+        score = min(score, 0.5)
+        reasons.append("Imagen de adquisicion/confirmacion (EXP_TYPE=%s): sirve para apuntar el instrumento, no es "
+                       "una imagen cientifica. Busca una imagen NIRCam/MIRI i2d." % exp_type)
+    elif (not exp_type and any(k in inst_l for k in SPEC_2D)
+          and level not in {"spectrum_1d", "cube", "image_calibrated"}):
+        score = min(score, 0.5)
+        reasons.append("Plano 2D de espectrografo (sin EXP_TYPE en la cabecera; deducido del nombre). Busca x1d o "
+                       "una imagen NIRCam/MIRI i2d.")
 
     if name.endswith(("jpg", "jpeg", "png", "webp")) or (not is_fits):
         score = min(score, 0.35)

@@ -22,7 +22,7 @@ STATE_TEXT = {
     "invalid_region": "Región NO VÁLIDA: contiene píxeles vacíos (borde del mosaico) rellenados con la mediana. El escalón "
                       "artificial pasa el test como si fuera estructura. Repite con una región sin vacíos.",
     "reject": "Rechazado para descubrimiento: procedencia insuficiente.",
-    "exploratory_only": "Producto de detector (uncal/rate). Exploratorio, no ciencia usable.",
+    "exploratory_only": "Exploratorio, no ciencia usable.",
     "known_or_weak": "Campo usable, pero ningún descriptor sobrevive al FDR. Estructura típica o test insuficiente. No es candidato.",
     "morph_interesting": "Al menos un descriptor sobrevive al FDR. Interés morfológico. Sin espectro no hay identificación.",
     "needs_spectrum": "La morfología sobrevive al FDR. Siguiente paso: espectro (x1d) de la MISMA región.",
@@ -186,6 +186,12 @@ def interpret(plugin_results, structure_z=0.0, p_value=1.0, fdr_pass=None, prove
         state, is_candidate = "invalid_region", False
     meta = FAMILIES.get(top_key, FAMILIES["mixed"])
     verdict = STATE_TEXT[state]
+    if state == "exploratory_only":
+        # El motivo concreto (detector, espectrografo, adquisicion) viene de la procedencia.
+        why = [r for r in (provenance or {}).get("reasons", [])
+               if any(k in r.lower() for k in ("detector", "espectrografo", "adquisicion"))]
+        if why:
+            verdict = verdict + " " + why[-1]
     if mixed:
         verdict = "Empate de familias (%s vs %s, margen=%.3f). " % (ranked[0][0], second_key, margin) + verdict
     if region_invalid:                                   # primero: invalida todo lo demas

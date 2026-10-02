@@ -240,3 +240,20 @@ región por defecto y análisis completo:
     en la zona limpia). Con 2025 px, `kolmogorov_1941` sumaba 239 MB.
 43. `list_image_hdus` lee el tamaño de la cabecera (NAXISn) en lugar de cargar
     los datos de cada extensión (+135 MB con 4200 px).
+
+## Tipo de producto JWST (resultado real de NIRSpec)
+
+Un análisis de `jw01192008001_02120_00001_nrs1_cal.fits` (NIRSpec, F110W) salió
+`exploratory_only`, lo cual es correcto, pero con dos fallos.
+
+44. El veredicto decía "Producto de detector (uncal/rate)", un texto fijo y
+    falso para un `_cal`. Ahora dice el motivo real tomado de la procedencia
+    (detector, plano de espectrógrafo o imagen de adquisición).
+45. La procedencia usa `EXP_TYPE` de la cabecera cuando existe: espectroscopía
+    (NRS_MSASPEC, NRS_FIXEDSLIT, NRS_IFU, MIR_MRS, NIS_SOSS, NRC_WFSS…) o
+    adquisición (NRS_MSATA, NRS_TACQ, NRS_WATA…). Sin `EXP_TYPE` se mantiene la
+    deducción por el nombre. La app muestra el tipo de exposición.
+46. La lista de MAST mostraba los `_nrs1/_nrs2_cal` y los `mirifushort/long`
+    como "imagen 2D analizable". Ahora no lo son, y la nota dice "plano de
+    espectrógrafo o adquisición (no imagen del cielo)". Siguen visibles
+    desactivando el filtro.

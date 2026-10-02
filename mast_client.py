@@ -17,6 +17,9 @@ from pathlib import Path
 
 IMAGE_SUFFIXES = ("i2d.fits", "drc.fits", "drz.fits", "cal.fits", "flc.fits", "flt.fits", "sci.fits")
 NOT_IMAGE_SUFFIXES = ("x1d.fits", "x1dints.fits", "s3d.fits", "c1d.fits", "asn.fits", "spt.fits")
+# Detectores de espectrografos JWST: sus _cal/_rate son planos 2D de espectro (o
+# imagenes de adquisicion para apuntar), no imagenes del cielo.
+SPECTRO_DETECTORS = ("_nrs1", "_nrs2", "mirifushort", "mirifulong")
 MISSION_ALIASES = {
     "HST": {"HST", "HLA"},
     "JWST": {"JWST"},
@@ -108,6 +111,8 @@ def is_image_product(name):
         return False          # 'uncal.fits' termina en 'cal.fits': excluir antes
     if any(low.endswith(s) or low.endswith(s + ".gz") for s in NOT_IMAGE_SUFFIXES):
         return False
+    if any(k in low for k in SPECTRO_DETECTORS):
+        return False
     return any(low.endswith(s) or low.endswith(s + ".gz") for s in IMAGE_SUFFIXES)
 
 
@@ -123,6 +128,8 @@ def _hint(name, size_mb=None):
         return "cubo 3D (no imagen 2D)"
     if "uncal" in low or "_raw" in low:
         return "crudo del detector"
+    if any(k in low for k in SPECTRO_DETECTORS):
+        return "plano de espectrógrafo o adquisición (no imagen del cielo)"
     if "rateints" in low or "_rate." in low:
         return "cuentas/s del detector (nivel 2a)"
     if any(s in low for s in ("i2d", "_drz", "_drc")):

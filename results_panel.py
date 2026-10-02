@@ -228,10 +228,80 @@ def _tab_compare(crop):
                "exactamente lo que los tests intentan cuantificar.")
 
 
+# ---------------------------------------------------------------- alerta de descubrimiento
+
+def _discovery_card(R):
+    import json as _json
+
+    from discovery import evaluate
+    refs = []
+    for up in st.session_state.get("ref_jsons") or []:
+        try:
+            refs.append(_json.loads(up.getvalue().decode("utf-8")))
+        except Exception:
+            continue
+    g = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"), references=refs or None)
+    colors = {"invalid": "#5a1a1a", "none": "#1a1f1b", "unconfirmed": "#4a3210", "explained": "#3d3a10",
+              "robust": "#0f3d1c", "pioneer": "#2e1747"}
+    st.markdown(
+        "<div style='background:%s;border:1px solid #33ff66;padding:0.8rem 1rem;margin:0.4rem 0 0.8rem 0'>"
+        "<div style='font-size:1.4rem'>%s <b>%s</b></div><div>%s</div></div>"
+        % (colors[g["level"]], g["icon"], g["title"], g["meaning"]), unsafe_allow_html=True)
+    with st.expander("Comprobaciones de la alerta (%d de %d superadas)" % (sum(c["ok"] for c in g["checks"]), len(g["checks"])),
+                     expanded=g["level"] in ("robust", "pioneer", "unconfirmed")):
+        for c in g["checks"]:
+            st.markdown("%s **%s** — %s" % ("✅" if c["ok"] else "❌", c["check"], c["detail"]))
+        st.caption("Una comprobación que no se pudo hacer cuenta como no superada. Ningún nivel afirma un "
+                   "descubrimiento: el más alto pide revisión experta y datos independientes (otro filtro, otra época, "
+                   "otro instrumento).")
+    return g
+
+
+def _tab_golden(R):
+    gw = R.get("golden")
+    if not gw:
+        st.info("Vuelve a pulsar Analizar para calcular la ventana φ.")
+        return
+    st.markdown("**Ventana Fibonacci / razón áurea** — φ = 1.6180…, ángulo áureo = 137.508°. "
+                "Alerta solo si p < %.3f (Bonferroni para 2 tests al 1 %%)." % gw["alpha"])
+    if gw["alert"]:
+        st.success("🌻 Alerta φ: %s significativo frente a su nulo. Un p pequeño dice 'no es azar de este tipo', no "
+                   "identifica el mecanismo." % ", ".join(gw["alert_tests"]))
+    else:
+        st.info("Sin evidencia de patrón φ frente a los nulos.")
+    a, b = st.columns(2)
+    for col, t in zip((a, b), gw["tests"]):
+        col.markdown("**%s**" % t["test"])
+        if t.get("p") is None:
+            col.caption(t.get("note", ""))
+            continue
+        col.metric("p", "%.4f" % t["p"], "alerta" if t.get("alert") else "sin alerta", delta_color="off")
+        col.caption(t.get("note", ""))
+        if t.get("null"):
+            obs = t.get("statistic", t.get("n_phi_pairs"))
+            fig = go.Figure(go.Histogram(x=t["null"], nbinsx=30, marker_color=DIM, name="nulo"))
+            fig.add_vline(x=obs, line_color=ACCENT, line_width=2)
+            col.plotly_chart(_layout(fig, height=240, title="Observado (naranja) frente al nulo"), use_container_width=True)
+        if t["test"].startswith("ángulo"):
+            col.caption("%d fuentes puntuales usadas." % t["n_points"])
+        else:
+            col.caption("%d picos sobre la ley de potencia; %d pares con precisión suficiente; %d pares φ."
+                        % (t["n_peaks"], t.get("n_resolvable_pairs", 0), t.get("n_phi_pairs", 0)))
+
+
+def _tab_novelty():
+    st.markdown("**Novedad frente a tus análisis anteriores**")
+    st.caption("Sube los JSON de análisis previos (mínimo 5). Para cada descriptor se calcula cuánto se aleja este "
+               "análisis de la mediana de tus referencias (z robusto). Con |z| ≥ 5 y una estructura robusta, la alerta "
+               "sube a 🟣. Dice 'distinto de lo que ya analizaste', no 'nuevo para la ciencia'.")
+    st.file_uploader("JSON de referencia", type=["json"], accept_multiple_files=True, key="ref_jsons")
+
+
 # ---------------------------------------------------------------- entrada
 
 def render_results(R, crop, name, x0, y0, side, n_null):
     mat, fdr, mc, prov, A, details = R["materials"], R["fdr"], R["mc"], R["prov"], R["analytics"], R["details"]
+    gate = _discovery_card(R) if R.get("card") else None
     if mat.get("state") == "invalid_region":
         st.error("**Resultado NO VÁLIDO** — %s Las pestañas se muestran solo como diagnóstico." % mat.get("verdict"))
     else:
@@ -256,7 +326,8 @@ def render_results(R, crop, name, x0, y0, side, n_null):
     if mat.get("instrument_warning_reason"):
         st.warning("Aviso de instrumento: %s" % mat["instrument_warning_reason"])
 
-    tabs = st.tabs(["Nulo y FDR", "Espectro", "Escalas", "Mapa local", "Familias", "Descriptores", "Región vs nulo"])
+    tabs = st.tabs(["Nulo y FDR", "Espectro", "Escalas", "Mapa local", "Familias", "Descriptores", "Región vs nulo",
+                    "🌻 Fibonacci / φ", "Novedad"])
     with tabs[0]:
         _tab_null(R, n_null)
     with tabs[1]:
@@ -271,6 +342,17 @@ def render_results(R, crop, name, x0, y0, side, n_null):
         df = _tab_descriptors(R)
     with tabs[6]:
         _tab_compare(crop)
+    with tabs[7]:
+        _tab_golden(R)
+    with tabs[8]:
+        _tab_novelty()
+        if gate and gate.get("novelty") and gate["novelty"].get("available"):
+            nv = gate["novelty"]
+            st.metric("Máximo |z| frente a %d referencias" % nv["n_references"], "%.1f" % (nv["max_abs_z"] or 0))
+            st.dataframe([{"descriptor": k, "valor": v["value"], "mediana referencias": v["ref_median"], "z": v["z"]}
+                          for k, v in nv["per_descriptor"].items()], hide_index=True, use_container_width=True)
+        elif gate and gate.get("novelty"):
+            st.caption(gate["novelty"].get("note", ""))
 
     stem = "cms80_%s_x%d_y%d_s%d" % (str(name).split(".")[0], x0, y0, side)
     d1, d2, d3 = st.columns(3)

@@ -31,6 +31,13 @@ st.markdown("## CMS-80 Cosmic Materials Scout")
 st.caption("Busca organización espacial tipo material en imágenes científicas (FITS) y la compara con un nulo "
            "que conserva espectro e histograma. No identifica compuestos: eso exige espectroscopía.")
 
+MODE = st.radio("Modo", ["🔭 Imagen astronómica (FITS)", "📡 Señales de radio"], horizontal=True, key="mode",
+                label_visibility="collapsed")
+if MODE.startswith("📡"):
+    from radio_page import render_radio_page
+    render_radio_page()
+    st.stop()
+
 # ---------------------------------------------------------------- ajustes avanzados
 with st.sidebar:
     st.markdown("**Ajustes avanzados**")
@@ -555,9 +562,24 @@ if st.button("Analizar", type="primary"):
         nos = morphological_nos(results)
         cand = build_candidate(name, results, materials, prov, nos, mc, meta_full, src)
         cand["analytics"] = analytics
+        # Controles de la alerta de descubrimiento (discovery.py) y ventana phi (golden.py).
+        from discovery import evaluate, fdr_replicate, fdr_without_point_sources, find_point_sources
+        from golden import golden_window
+        with st.spinner("Controles: otra semilla, fuentes puntuales enmascaradas y ventana φ…"):
+            replicate = fdr_replicate(crop, n_simulations=n_null, seed=SEED + 1000)
+            n_src = (results.get("ridges") or {}).get("n_compact_sources") or 0
+            masked = fdr_without_point_sources(crop_raw, n_simulations=n_null, seed=SEED + 2000) if n_src >= 3 else None
+            golden = golden_window(crop, find_point_sources(crop_raw)[0], seed=SEED)
+        gate = evaluate(cand, masked=masked, replicate=replicate)
+        cand["discovery_gate"] = {k: v for k, v in gate.items() if k != "novelty"}
+        cand["discovery_controls"] = {"replicate": replicate, "point_sources_masked": masked}
+        cand["golden_window"] = {"alpha": golden["alpha"], "alert": golden["alert"],
+                                 "tests": [{k: v for k, v in t.items() if k != "null"} for t in golden["tests"]]}
+        cand["morphology"]["is_candidate"] = gate["level"] in ("robust", "pioneer")
         st.session_state["results"] = {"key": pkey + (x0, y0, side), "results": results, "mc": mc, "fdr": fdr,
                                        "materials": materials, "nos": nos, "prov": prov, "json": dumps_candidate(cand),
-                                       "details": details, "analytics": analytics}
+                                       "details": details, "analytics": analytics, "card": cand, "masked": masked,
+                                       "replicate": replicate, "golden": golden}
     except Exception as exc:
         st.exception(exc)
 

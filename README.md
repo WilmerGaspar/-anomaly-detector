@@ -39,6 +39,26 @@ Identificar la sustancia exige espectro y contexto del instrumento.
 - Rosenstein sobre media por filas (proxy espacial)
 - Nulo: subrogados de fase
 
+## Alerta de descubrimiento (semáforo)
+
+Cada análisis termina en un nivel: 🔴 no válido, ⚪ sin estructura, 🟠 sin confirmar,
+🟡 explicado por un confusor (bordes vacíos, fuentes puntuales, picos de difracción,
+artefactos, dependencia de la semilla), 🟢 estructura robusta o 🟣 alerta de pionero
+(robusta y atípica frente a tus análisis previos). Ningún nivel afirma un
+descubrimiento: el más alto pide revisión experta y datos independientes.
+
+## Ventana Fibonacci / φ
+
+Ángulo áureo entre fuentes y razones φ entre escalas, cada uno con su nulo. Alerta
+solo con p < 0.005. Si la resolución no permite distinguir φ de 3/2, lo dice.
+
+## Señales de radio
+
+Modo "📡 Señales de radio": biblioteca de firmas (púlsar, ráfaga dispersada,
+portadora con deriva, RFI) y detectores calibrados contra su nulo. DM ≈ 0 y deriva
+≈ 0 se marcan como probable interferencia terrestre. Comparación con catálogos
+públicos exportados en CSV (ATNF psrcat, CHIME/FRB).
+
 ## Instalacion
 
 ```bash

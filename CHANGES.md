@@ -292,3 +292,63 @@ Resultado en los controles: `filament` en 12/12 campos con filamentos, `lattice`
 en 3/3 redes, y ningún campo de estrellas sale `filament`. No hay una familia
 para "campo de fuentes puntuales": esos campos quedan en cascade/aggregate con
 el aviso.
+
+## Alerta de descubrimiento, ventana φ y señales de radio
+
+Origen: un análisis real de MIRI (`jw01192006001_03105_00002_mirimage_cal`, F1000W)
+con 93 fuentes puntuales salía `needs_spectrum` y candidato, aunque las fuentes
+puntuales por sí solas bastan para pasar el FDR (punto 47).
+
+### Semáforo (`discovery.py`)
+
+52. Niveles: 🔴 no válido · ⚪ sin estructura · 🟠 sin confirmar (faltan controles)
+    · 🟡 explicado por un confusor · 🟢 estructura robusta · 🟣 alerta de pionero
+    (robusta y atípica frente a tus análisis previos). **Una comprobación que no se
+    pudo hacer cuenta como no superada**: sin esta regla, el JSON de MIRI salía 🟢.
+53. **Fuentes puntuales enmascaradas.** Cada fuente se sustituye por píxeles al
+    azar de su anillo (un valor constante crearía mesetas) y se repite el FDR.
+    Medido: ruido + 40 estrellas pasaba hasta 3/4 → 0/4 tras enmascarar (4/4
+    campos). Filamentos + estrellas tras enmascarar = filamentos solos (0, 0, 3,
+    1 de 4 en ambos casos): la prueba quita las estrellas sin borrar estructura.
+54. Réplica con otra semilla, picos de difracción, artefactos, zonas vacías y
+    procedencia son parte de las comprobaciones. `is_candidate` en el JSON sigue
+    al semáforo (solo 🟢 o 🟣).
+55. Novedad: z robusto (mediana, 1.4826·MAD) por descriptor frente a ≥ 5 JSON
+    previos que subes tú. |z| ≥ 5 con estructura robusta → 🟣. Dice "distinto de lo
+    que ya analizaste", no "nuevo para la ciencia".
+
+### Ventana Fibonacci / φ (`golden.py`)
+
+56. Ángulo áureo (137.508°) entre fuentes ordenadas por radio; nulo: barajar el
+    orden. Espiral de Vogel p ≤ 0.004; puntos al azar p = 0.12–0.71; girasol
+    simulado detectado desde la imagen p = 0.001.
+57. Razones φ y φ² entre picos del espectro radial; nulo: mismo número de picos
+    en frecuencias al azar. **Primera versión descartada:** a la resolución usada,
+    anillos con razón 3/2 daban el mismo "resultado φ" que los de razón φ. Ahora
+    solo cuentan pares resolubles a ±5 % y el espectro usa hasta 1024 px. Medido
+    (1024 px): φ p = 0.001; 3/2 p = 0.41–0.46; ruido p = 0.83–1.0. Si no hay
+    resolución, dice "resolución insuficiente". Alerta solo con p < 0.005.
+
+### Señales de radio (`radio_signals.py`, `radio_page.py`)
+
+58. Biblioteca de firmas generadas por su ecuación: púlsar, ráfaga dispersada
+    (t ∝ DM·f⁻², K = 4.148808 ms GHz² pc⁻¹ cm³), portadora con deriva Doppler, y dos
+    RFI (impulso con DM = 0, portadora con deriva 0). Enlaces a ATNF psrcat,
+    CHIME/FRB y Breakthrough Listen Open Data (la app no se conecta a ellos).
+59. Calibración medida (y fallos corregidos por el camino):
+    - Periodicidad: falsas alarmas en ruido blanco 1.2 % (nominal 1 %), ruido
+      rojo 1/100, púlsar 20/20. Errores encontrados: relleno del filtro de
+      mediana (48 % de falsas alarmas), ventana fija con ruido rojo (30/30),
+      primer bin de frecuencia (10/30), índices de armónicos tras cortar
+      frecuencias bajas (sensibilidad 6/20 → 20/20).
+    - Periodo afinado por plegado con incertidumbre: error real ≤ 0.33 σ en 20
+      casos. El cruce con catálogo usa esa incertidumbre (antes no encontraba un
+      púlsar medido con 0.3 % de error).
+    - Dispersión: ruido 2/110 (1.8 %), ráfagas DM 500 detectadas 5/5 con DM 497–503,
+      ruido de colas pesadas 0/10, impulso RFI con DM = 0 marcado.
+    - Deriva: ruido 0/20, derivas −0.15 y 0.37 Hz/s exactas 5/5, deriva 0 marcada
+      como RFI. Rejilla de derivas con la resolución real (con pasos de 0.1 Hz/s,
+      −0.15 Hz/s no se detectaba).
+60. Entradas: serie temporal (CSV/TXT/NPY/FITS), espectro dinámico canales×tiempo,
+    espectrograma tiempo×canales. Los formatos de radiotelescopio (.fil, .h5)
+    deben convertirse antes.

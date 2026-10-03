@@ -27,6 +27,9 @@ import numpy as np
 
 K_DM_S = 4.148808e-3          # s GHz^2 / (pc cm^-3)
 FAP = 0.01                    # probabilidad de falsa alarma global para declarar detección
+# Tope de cálculo de drift_search: celdas sumadas (derivas x tiempo x canal x barridos).
+# Medido ~95 M celdas/s: el tope son ~1 min. Sin él, 1024 x 1024 con ±1 Hz/s tardaba ~25 min.
+DRIFT_WORK_MAX = 6e9
 
 
 # ---------------------------------------------------------------- biblioteca de firmas
@@ -274,6 +277,10 @@ def drift_search(dyn, df_hz, dt, max_drift=1.0, n_null=19, seed=0):
     nt, nch = dyn.shape
     step = df_hz / (nt * dt)
     n_side = int(np.ceil(max_drift / step))
+    # Si no cabe en el tope se conserva el paso (la resolución) y se acorta el rango, y se dice.
+    cap = max(1, int((DRIFT_WORK_MAX / (nt * nch * (n_null + 1)) - 1) // 2))
+    limited = n_side > cap
+    n_side = min(n_side, cap)
     drifts = np.arange(-n_side, n_side + 1) * step
     base = np.arange(nch)[None, :]
     offsets = [np.round(r * np.arange(nt) * dt / df_hz).astype(int) for r in drifts]
@@ -294,16 +301,21 @@ def drift_search(dyn, df_hz, dt, max_drift=1.0, n_null=19, seed=0):
     rng = np.random.default_rng(seed)
     null = np.array([scan(np.stack([np.roll(row, rng.integers(nch)) for row in dyn]))[0] for _ in range(int(n_null))])
     zero = abs(drift) < step * 0.5
+    span = n_side * step
+    limit_note = (" Rango buscado ±%.3g Hz/s, no ±%.3g: el completo tardaría demasiado en el servidor. Para "
+                  "ampliarlo, promedia en tiempo (binning): el paso no cambia y cada deriva cuesta menos."
+                  % (span, max_drift)) if limited else ""
     return {"snr": snr, "drift_hz_s": drift, "drift_step_hz_s": float(step), "channel": ch, "fap": fap,
             "null_snr": null.tolist(), "n_trials": int(n_trials),
+            "drift_range_hz_s": float(span), "range_limited": bool(limited),
             # Dos condiciones: FAP analitica (ruido gaussiano) y superar todos los nulos
             # permutados (protege si el ruido real tiene colas pesadas).
             "detected": bool(fap <= FAP and snr > null.max()),
             "likely_rfi": bool(zero),
             "note": ("Deriva ≈ 0 Hz/s: emisor fijo respecto a la antena → probable interferencia terrestre." if zero
-                     else "Deriva %.4f Hz/s: hay aceleración relativa emisor-antena (Doppler)." % drift),
-            "method": "de-Doppler %d derivas (paso %.4f Hz/s); FAP = N·P(Z>snr) con N = %d; control: %d nulos permutados"
-                      % (len(drifts), step, n_trials, n_null)}
+                     else "Deriva %.4f Hz/s: hay aceleración relativa emisor-antena (Doppler)." % drift) + limit_note,
+            "method": "de-Doppler %d derivas (paso %.4f Hz/s, rango ±%.3g Hz/s); FAP = N·P(Z>snr) con N = %d; control: "
+                      "%d nulos permutados" % (len(drifts), step, span, n_trials, n_null)}
 
 
 # ---------------------------------------------------------------- cruce con catálogo público

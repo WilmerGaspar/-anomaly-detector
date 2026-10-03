@@ -4,6 +4,7 @@ import argparse, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import shutil
 from mast_client import download_product, list_fits_products, search_observations
 TARGETS = ["NGC 7023", "M16", "Orion Nebula", "Tarantula Nebula", "Carina Nebula", "Crab Nebula", "Rho Ophiuchi", "M51", "NGC 604", "Helix Nebula"]
 
@@ -35,8 +36,8 @@ def main():
             if dest.exists():
                 print(" have", dest.name); got += 1; saved += 1; continue
             try:
-                blob = download_product(prod["uri"], prod["filename"], max_mb=80)
-                dest.write_bytes(blob)
+                path = download_product(prod["uri"], prod["filename"], max_mb=80)   # devuelve ruta
+                shutil.move(path, dest)
                 print(" ok", dest.name); got += 1; saved += 1
             except Exception as exc:
                 print(" download fail", exc)

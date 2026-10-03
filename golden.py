@@ -89,8 +89,11 @@ def phi_scale_test(image, n_null=2000, seed=0, tol=0.03):
     from scoring import downsample_for_null
     small = downsample_for_null(np.asarray(image, dtype=float), max_side=1024)
     k, p = radial_power_spectrum(small, n_bins=max(16, min(small.shape) // 2))
-    ok = p > 0
+    ok = np.isfinite(p) & (p > 0)
     k, p = k[ok], p[ok]
+    if len(k) < 3:                     # imagen constante (p. ej. una extension ERR uniforme): no hay espectro
+        return {"test": "razones φ entre escalas", "n_peaks": 0, "peak_k": [], "tolerance": tol, "p": None,
+                "alert": False, "n_phi_pairs": 0, "note": "La región no tiene variación: no hay espectro que analizar."}
     peaks, fit = _peaks_over_powerlaw(k, p)
     out = {"test": "razones φ entre escalas", "n_peaks": int(len(peaks)), "peak_k": peaks.tolist(), "tolerance": tol}
     if len(peaks) < 2:

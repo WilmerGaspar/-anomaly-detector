@@ -579,6 +579,16 @@ if st.button("Analizar", type="primary"):
         cand["golden_window"] = {"alpha": golden["alpha"], "alert": golden["alert"],
                                  "tests": [{k: v for k, v in t.items() if k != "null"} for t in golden["tests"]]}
         cand["morphology"]["is_candidate"] = gate["level"] in ("robust", "pioneer")
+        # El estado y el veredicto siguen al semaforo: antes podian decir "interes morfologico"
+        # mientras el semaforo decia "explicado por un confusor" (HST WFPC2 real).
+        new_state = {"none": "known_or_weak", "explained": "explained_by_confounder",
+                     "unconfirmed": "unconfirmed"}.get(gate["level"])
+        if new_state and materials.get("state") not in ("reject", "exploratory_only", "invalid_region"):
+            failed = [c["check"] + ": " + c["detail"] for c in gate["checks"] if not c["ok"]]
+            verdict = "%s %s. %s" % (gate["icon"], gate["title"], " · ".join(failed) if failed else gate["meaning"])
+            for target in (materials, cand["morphology"]):
+                target["state"], target["verdict"] = new_state, verdict
+            cand["state"] = new_state
         st.session_state["results"] = {"key": pkey + (x0, y0, side), "results": results, "mc": mc, "fdr": fdr,
                                        "materials": materials, "nos": nos, "prov": prov, "json": dumps_candidate(cand),
                                        "details": details, "analytics": analytics, "card": cand, "masked": masked,

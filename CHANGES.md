@@ -403,3 +403,14 @@ con ≥ 3 fuentes y los picos contaban como fallo solo por existir.
 71. Reproducción del caso (emisión log-normal ± 35 estrellas): antes 3–4/4 tras
     enmascarar y alerta φ; ahora ⚪ y φ p ≈ 1. Los controles anteriores (28 campos)
     no cambian: ningún 🟢 falso. Tests de regresión añadidos.
+
+## Estado coherente con el semáforo (HST WFPC2 real)
+
+`hst_9260_01_wfpc2_pc_f814w_u6iu01_drz` (región 1024 px): el semáforo dio 🟡
+correctamente (FDR 2/4 → 0/4 al enmascarar 370 fuentes, 2.5 % del área; y 0/4 con
+otra semilla), pero el estado seguía diciendo `morph_interesting` — "Al menos un
+descriptor sobrevive al FDR. Interés morfológico".
+
+72. Con el semáforo en ⚪, 🟡 o 🟠, el estado pasa a `known_or_weak`,
+    `explained_by_confounder` o `unconfirmed`, y el veredicto enumera las
+    comprobaciones que fallaron. Esos estados figuran en `followup.reject_if`.

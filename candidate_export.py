@@ -59,7 +59,7 @@ def build_candidate(filename, plugin_results, materials, provenance, nos, monte_
             "p_critical": fdr.get("p_critical"), "fdr_pass": fdr.get("fdr_pass"),
         },
         "descriptors": desc,
-        "followup": {"action": materials.get("followup"), "needs_spectrum": True, "reject_if": "state in (reject, exploratory_only, known_or_weak, invalid_region)"},
+        "followup": {"action": materials.get("followup"), "needs_spectrum": True, "reject_if": "state in (reject, exploratory_only, known_or_weak, invalid_region, explained_by_confounder, unconfirmed)"},
         "spectrum": {"status": "missing", "kind": None, "xy": None, "notes": "Pegar espectro de la MISMA region."},
         "spectral_identifier_handoff": {"target": "WilmerGaspar/spectral-identifier-v1", "ready": False, "reason": "Sin xy espectral no hay identificacion."},
     }

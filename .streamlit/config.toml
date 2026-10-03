@@ -5,3 +5,8 @@ backgroundColor = "#020803"
 secondaryBackgroundColor = "#07140a"
 textColor = "#b7ffc2"
 font = "monospace"
+
+[server]
+# Streamlit recibe la subida en memoria (~2x el archivo) antes de que la app la pase a disco.
+# Medido con un drz del Hubble de 203 MB: pico de 578 MB. Streamlit Cloud garantiza ~690 MB.
+maxUploadSize = 200

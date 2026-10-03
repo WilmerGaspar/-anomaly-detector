@@ -4,7 +4,8 @@ Flujo unico: 1) fuente de datos con procedencia visible, 2) imagen y region,
 3) sonificacion comparativa, 4) analisis con nulo IAAFT + FDR.
 Requiere streamlit >= 1.35 (seleccion de filas en st.dataframe).
 """
-import io
+import os
+import shutil
 
 import numpy as np
 import streamlit as st
@@ -89,21 +90,161 @@ def run_plugins(image, active, raw=None):
     return out
 
 
+FIELD_MAX_IDLE_H = 6
+
+
+def _cleanup_stale_fields(keep, max_idle_h=FIELD_MAX_IDLE_H):
+    """Borra lo que dejaron sesiones sin uso en max_idle_h horas (carpetas cms80_* y descargas
+    a medias): cada carpeta guarda hasta 400 MB y Streamlit no avisa cuando una sesion termina."""
+    import glob
+    import tempfile
+    import time
+    limit = time.time() - max_idle_h * 3600
+    for p in glob.glob(os.path.join(tempfile.gettempdir(), "cms80_*")):
+        if os.path.abspath(p) == os.path.abspath(keep):
+            continue
+        try:
+            if os.path.isdir(p):
+                newest = max([os.path.getmtime(p)] + [os.path.getmtime(os.path.join(p, f)) for f in os.listdir(p)])
+                if newest < limit:
+                    shutil.rmtree(p, ignore_errors=True)
+            elif os.path.getmtime(p) < limit:
+                os.remove(p)
+        except OSError:
+            pass
+
+
+def _field_dir():
+    """Carpeta temporal de esta sesion. El FITS va a disco: guardarlo como bytes en la sesion,
+    mas las copias al subirlo y leerlo, llevaba un drz de HST de 212 MB a 1.06 GB de memoria
+    (Streamlit Cloud garantiza ~690 MB y la app se caia)."""
+    import tempfile
+    import uuid
+    d = st.session_state.get("field_dir")
+    if not d or not os.path.isdir(d):
+        d = os.path.join(tempfile.gettempdir(), "cms80_%s" % uuid.uuid4().hex)
+        os.makedirs(d, exist_ok=True)
+        st.session_state["field_dir"] = d
+        _cleanup_stale_fields(keep=d)
+    return d
+
+
 def set_field(data, name, source):
-    """Guarda el archivo elegido y su procedencia; invalida resultados previos."""
-    st.session_state["field_bytes"] = data
+    """Guarda el archivo elegido EN DISCO (data: ruta, archivo abierto o bytes) y su procedencia;
+    invalida resultados previos y borra el archivo anterior de la sesion."""
+    old = st.session_state.get("field_path")
+    dest = os.path.join(_field_dir(), "campo_" + "".join(c if c.isalnum() or c in "._-" else "_" for c in str(name))[-120:])
+    if isinstance(data, (str, os.PathLike)):
+        if os.path.abspath(str(data)) != os.path.abspath(dest):
+            shutil.move(str(data), dest)
+            folder = os.path.dirname(os.path.abspath(str(data)))
+            if os.path.basename(folder).startswith("cms80_mast_"):      # carpeta propia de la descarga
+                shutil.rmtree(folder, ignore_errors=True)
+    else:
+        with open(dest, "wb") as fh:
+            if hasattr(data, "read"):              # por trozos: getbuffer() de un BytesIO copia todo
+                data.seek(0)
+                shutil.copyfileobj(data, fh, 1 << 20)
+            else:
+                fh.write(data)
+    if old and old != dest and os.path.exists(old):
+        os.remove(old)
+    st.session_state["field_path"] = dest
+    st.session_state["field_size"] = os.path.getsize(dest)
     st.session_state["field_name"] = name
     st.session_state["field_source"] = source
-    for k in ("parsed", "parsed_key", "results"):
+    # Las caches van por (nombre, tamano): otro archivo con el mismo nombre y tamano las reutilizaria.
+    for k in ("parsed", "parsed_key", "results", "field_bytes", "hdus", "hdus_key", "clean_sq", "clean_key", "audio"):
         st.session_state.pop(k, None)
 
 
 # ---------------------------------------------------------------- carga de imagen
 
-def list_image_hdus(raw):
+def _forget_upload(up):
+    """Borra el archivo subido del gestor de Streamlit (como hace st.chat_input). Sin esto la copia
+    en memoria solo se libera al pulsar la X o al cerrar la sesion. Si la API interna cambia,
+    no hace nada: la app sigue funcionando, solo con mas memoria."""
+    try:
+        from streamlit.runtime.memory_uploaded_file_manager import MemoryUploadedFileManager
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        if ctx is not None and isinstance(ctx.uploaded_file_mgr, MemoryUploadedFileManager):
+            ctx.uploaded_file_mgr.remove_file(session_id=ctx.session_id, file_id=up.file_id)
+    except Exception:
+        pass
+
+
+def _open_fits(path):
     from astropy.io import fits
+    return fits.open(path, memmap=False)
+
+
+def _fits_reader(path, hdu_index):
+    """((alto, ancho), read) de una extension 2D sin cargarla: read(y0, y1, x0, x1) lee solo esa
+    ventana del disco en float32 (hdu.section aplica BSCALE/BZERO)."""
+    with _open_fits(path) as hdul:
+        shape = tuple(int(n) for n in hdul[hdu_index].shape)
+    axes = [k for k, n in enumerate(shape) if n > 1]
+    if len(axes) != 2:
+        raise ValueError("La extensión no es una imagen 2D.")
+    ry, rx = axes
+
+    def read(y0, y1, x0, x1):
+        idx = [0] * len(shape)
+        idx[ry], idx[rx] = slice(y0, y1), slice(x0, x1)
+        with _open_fits(path) as hdul:
+            win = hdul[hdu_index].section[tuple(idx)]
+        return np.asarray(win, dtype=np.float32).reshape(y1 - y0, x1 - x0)
+    return (shape[ry], shape[rx]), read
+
+
+def _array_reader(arr):
+    return arr.shape, lambda y0, y1, x0, x1: arr[y0:y1, x0:x1]
+
+
+class FieldImage:
+    """Imagen de estudio. Un FITS se queda EN DISCO: en memoria solo estan la miniatura
+    (<= PREVIEW_SIDE px), el mapa de zonas vacias y los limites de los pixeles validos,
+    calculados en una sola pasada por bloques de filas; la region se lee del disco al
+    elegirla. Asi la memoria no crece con la imagen: con la imagen entera en memoria, una
+    de 10000x10000 llegaba a 830 MB y Streamlit Cloud solo garantiza ~690 MB."""
+
+    def __init__(self, shape, read, max_coarse=1024, min_area=64, rows_per_block=512):
+        h, w = self.shape = (int(shape[0]), int(shape[1]))
+        self._read, self._last = read, None
+        f = HoleMap.factor(self.shape, max_coarse)
+        hc, wc = -(-h // f), -(-w // f)
+        self.step = step = max(1, int(np.ceil(max(h, w) / PREVIEW_SIDE)))
+        self.thumb = np.empty((-(-h // step), -(-w // step)), dtype=np.float32)
+        frac = np.zeros((hc, wc), dtype=np.float32)
+        row_ok, col_ok = np.zeros(h, dtype=bool), np.zeros(w, dtype=bool)
+        nb = f * max(1, rows_per_block // f)                  # bloques alineados con los f x f
+        for a in range(0, h, nb):
+            b = min(a + nb, h)
+            blk = read(a, b, 0, w)
+            fin = np.isfinite(blk)
+            row_ok[a:b] = fin.any(axis=1)
+            col_ok |= fin.any(axis=0)
+            bad = np.zeros((-(-(b - a) // f) * f, wc * f), dtype=bool)
+            bad[:b - a, :w] = ~fin
+            frac[a // f:a // f + bad.shape[0] // f] += bad.reshape(-1, f, wc, f).sum(axis=(1, 3))
+            rows = np.arange(a + (-a) % step, b, step)
+            self.thumb[rows // step] = blk[rows - a, ::step]
+        self.holes = HoleMap.from_fraction(frac / (f * f), f, self.shape, min_area)
+        rows, cols = np.where(row_ok)[0], np.where(col_ok)[0]
+        self.bbox = None if rows.size == 0 else (int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1)
+
+    def crop(self, y0, x0, side):
+        """Region cuadrada (copia float32); la ultima se guarda para no releer el disco en cada recarga."""
+        key = (int(y0), int(x0), int(side))
+        if self._last is None or self._last[0] != key:
+            self._last = (key, np.array(self._read(y0, y0 + side, x0, x0 + side), dtype=np.float32))
+        return self._last[1].copy()
+
+
+def list_image_hdus(path):
     out = []
-    with fits.open(io.BytesIO(raw), memmap=False) as hdul:
+    with _open_fits(path) as hdul:
         for i, hdu in enumerate(hdul):
             if not getattr(hdu, "is_image", False):
                 continue
@@ -120,13 +261,16 @@ def list_image_hdus(raw):
     return out
 
 
-def parse_field(raw, name, hdu_index=None):
+def parse_field(path, name, hdu_index=None):
     low = str(name).lower()
     if low.endswith((".fits", ".fit", ".fits.gz")):
-        from astropy.io import fits
-        with fits.open(io.BytesIO(raw), memmap=False) as hdul:
+        try:
+            field = FieldImage(*_fits_reader(path, hdu_index))
+        except Exception:                      # p. ej. una extension comprimida sin acceso por ventanas
+            with _open_fits(path) as hdul:
+                field = FieldImage(*_array_reader(np.array(np.squeeze(hdul[hdu_index].data), dtype=np.float32)))
+        with _open_fits(path) as hdul:
             hdu = hdul[hdu_index]
-            data = np.squeeze(np.asarray(hdu.data, dtype=np.float32))
             h0, h1 = hdul[0].header, hdu.header
 
             def hk(*keys):
@@ -142,20 +286,12 @@ def parse_field(raw, name, hdu_index=None):
                     "exp_type": hk("EXP_TYPE")}
     else:
         from PIL import Image
-        im = Image.open(io.BytesIO(raw))
-        fmt = im.format
-        data = np.asarray(im.convert("L"), dtype=np.float32)
+        with Image.open(path) as im:
+            fmt = im.format
+            field = FieldImage(*_array_reader(np.asarray(im.convert("L"), dtype=np.float32)))
         meta = {"filename": name, "format": fmt, "is_fits": False, "hdu": "", "instrument": "", "filter": ""}
-    meta["width"], meta["height"] = int(data.shape[1]), int(data.shape[0])
-    return data, meta
-
-
-def finite_bbox(data):
-    finite = np.isfinite(data)
-    rows, cols = np.where(finite.any(axis=1))[0], np.where(finite.any(axis=0))[0]
-    if rows.size == 0:
-        return None
-    return int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
+    meta["height"], meta["width"] = field.shape
+    return field, meta
 
 
 class HoleMap:
@@ -170,23 +306,35 @@ class HoleMap:
     cubrir los bloques del borde parcialmente vacios."""
 
     def __init__(self, data, max_coarse=1024, min_area=64):
-        from scipy.ndimage import binary_dilation, label
         h, w = data.shape
-        self.f = f = max(1, int(np.ceil(max(h, w) / max_coarse)))
-        hc, wc = -(-h // f), -(-w // f)
-        frac = np.zeros((hc, wc), dtype=np.float32)
+        f = self.factor((h, w), max_coarse)
+        frac = np.zeros((-(-h // f), -(-w // f)), dtype=np.float32)
         for i in range(f):                       # sin copiar la imagen: suma por desplazamientos
             for j in range(f):
                 sub = ~np.isfinite(data[i::f, j::f])
                 frac[:sub.shape[0], :sub.shape[1]] += sub
-        frac /= f * f
+        self._build(frac / (f * f), f, (h, w), min_area)
+
+    @staticmethod
+    def factor(shape, max_coarse=1024):
+        return max(1, int(np.ceil(max(shape) / max_coarse)))
+
+    @classmethod
+    def from_fraction(cls, frac, f, shape, min_area=64):
+        """Desde la fraccion de pixeles vacios por bloque f x f (FieldImage la calcula leyendo del disco)."""
+        self = cls.__new__(cls)
+        self._build(frac, f, shape, min_area)
+        return self
+
+    def _build(self, frac, f, shape, min_area):
+        from scipy.ndimage import binary_dilation, label
         bad = frac > 0.5
         lab, _ = label(bad)
         sizes = np.bincount(lab.ravel())
         keep = sizes * f * f >= min_area
         keep[0] = False
         self.coarse = binary_dilation(keep[lab]) if keep.any() else np.zeros_like(bad)
-        self.shape = (h, w)
+        self.f, self.shape = f, tuple(shape)
 
     def _rows_cols(self, y0, x0, side):
         return np.arange(y0, y0 + side) // self.f, np.arange(x0, x0 + side) // self.f
@@ -246,10 +394,10 @@ def stretch(a, lo=2, hi=98):
     return out.astype(np.float32), (float(p_lo), float(p_hi))
 
 
-def preview_with_box(data, y0, x0, side):
+def preview_with_box(field, y0, x0, side):
     from PIL import Image, ImageDraw
-    step = max(1, int(np.ceil(max(data.shape) / PREVIEW_SIDE)))
-    small, _ = stretch(data[::step, ::step])
+    step = field.step
+    small, _ = stretch(field.thumb)
     im = Image.fromarray((small * 255).astype(np.uint8)).convert("RGB")
     d = ImageDraw.Draw(im)
     d.rectangle([x0 // step, y0 // step, (x0 + side) // step, (y0 + side) // step], outline=(51, 255, 102), width=2)
@@ -379,10 +527,19 @@ if source_kind == "Archivo MAST (STScI)":
                         st.error(str(exc))
 
 elif source_kind == "Archivo propio":
-    up = st.file_uploader("FITS (recomendado) o imagen", type=["fits", "fit", "png", "jpg", "jpeg", "tif", "tiff"], key="local_up")
-    if up is not None and up.name != st.session_state.get("field_name"):
-        set_field(up.getvalue(), up.name, {"archive": "archivo local del usuario", "product": up.name})
-    st.caption("Indica en tu informe de dónde sale el archivo: el sistema no puede verificarlo.")
+    # Tras guardar el archivo en disco se borra la copia que Streamlit guarda en memoria (si no,
+    # un FITS de 200 MB la ocupa toda la sesion) y se cambia la clave del widget para vaciarlo.
+    up_key = "local_up_%d" % st.session_state.get("up_gen", 0)
+    up = st.file_uploader("FITS (recomendado) o imagen", type=["fits", "fit", "png", "jpg", "jpeg", "tif", "tiff"], key=up_key)
+    if up is not None:
+        set_field(up, up.name, {"archive": "archivo local del usuario", "product": up.name})
+        _forget_upload(up)
+        del up
+        st.session_state.pop(up_key, None)
+        st.session_state["up_gen"] = st.session_state.get("up_gen", 0) + 1
+        st.rerun()
+    st.caption("Hasta 200 MB. Para archivos más grandes usa MAST o URL directa: se descargan directamente al disco "
+               "y gastan menos memoria. Indica en tu informe de dónde sale el archivo: el sistema no puede verificarlo.")
 
 else:
     url = st.text_input("URL de un archivo FITS", key="direct_url")
@@ -396,7 +553,16 @@ else:
             st.error(str(exc))
 
 # ================================================================ 2. IMAGEN Y REGION
-raw = st.session_state.get("field_bytes")
+raw = st.session_state.get("field_path")
+if raw and not os.path.exists(raw):
+    # Otra sesion lo borro tras FIELD_MAX_IDLE_H horas sin uso (ver _cleanup_stale_fields).
+    for k in ("field_path", "field_name", "parsed", "parsed_key", "results"):
+        st.session_state.pop(k, None)
+    st.warning("El archivo de esta sesión se borró tras %d h sin uso. Vuelve a cargarlo." % FIELD_MAX_IDLE_H)
+    raw = None
+elif raw:
+    os.utime(raw)                      # marca de uso: la limpieza solo borra sesiones inactivas
+raw_size = st.session_state.get("field_size") or 0
 name = st.session_state.get("field_name")
 source = st.session_state.get("field_source") or {}
 if not raw:
@@ -404,12 +570,12 @@ if not raw:
     st.stop()
 
 st.markdown("### 2. Imagen y región de estudio")
-st.success("Cargado: %s · %.1f MB · origen: %s" % (name, len(raw) / 1048576, source.get("archive", "—")))
+st.success("Cargado: %s · %.1f MB · origen: %s" % (name, raw_size / 1048576, source.get("archive", "—")))
 
 hdu_index = None
 if str(name).lower().endswith((".fits", ".fit", ".fits.gz")):
     try:
-        hkey = (name, len(raw))
+        hkey = (name, raw_size)
         if st.session_state.get("hdus_key") != hkey:
             st.session_state["hdus"] = list_image_hdus(raw)
             st.session_state["hdus_key"] = hkey
@@ -427,7 +593,7 @@ if str(name).lower().endswith((".fits", ".fit", ".fits.gz")):
     if hdus[choice]["name"] != "SCI" and any(h["name"] == "SCI" for h in hdus):
         st.warning("Estás analizando %s, no SCI. ERR/WHT/VAR no son mapas del cielo." % hdus[choice]["name"])
 
-pkey = (name, len(raw), hdu_index)
+pkey = (name, raw_size, hdu_index)
 if st.session_state.get("parsed_key") != pkey:
     try:
         st.session_state["parsed"] = parse_field(raw, name, hdu_index)
@@ -436,23 +602,22 @@ if st.session_state.get("parsed_key") != pkey:
     except Exception as exc:
         st.exception(exc)
         st.stop()
-data, meta = st.session_state["parsed"]
+field, meta = st.session_state["parsed"]
 
-bbox = finite_bbox(data)
+bbox = field.bbox
 if bbox is None:
     st.error("La extensión no tiene píxeles válidos (todo NaN).")
     st.stop()
 r0, r1, c0, c1 = bbox
-H, W = data.shape
+H, W = field.shape
 max_side = min(H, W, MAX_ANALYSIS_SIDE)
 # Region por defecto: el mayor cuadrado sin pixeles vacios. Los bordes NaN de los
 # mosaicos, rellenados con la mediana, crean escalones que el nulo toma por
 # estructura (medido: con 12 % de vacio, 2 de 6 campos sin estructura pasan el FDR).
+holes = field.holes
 if st.session_state.get("clean_key") != pkey:
-    st.session_state["holes"] = HoleMap(data)
-    st.session_state["clean_sq"] = st.session_state["holes"].largest_square()
+    st.session_state["clean_sq"] = holes.largest_square()
     st.session_state["clean_key"] = pkey
-holes = st.session_state["holes"]
 clean = st.session_state["clean_sq"]
 if clean:
     # Por defecto, como mucho DEFAULT_SIDE px centrados en la zona limpia: las regiones
@@ -486,13 +651,13 @@ if clean:
 else:
     st.warning("No hay ningún cuadrado de 32 px sin píxeles vacíos: el resultado no será válido.")
 
-crop_raw = data[y0:y0 + side, x0:x0 + side]
+crop_raw = field.crop(y0, x0, side)
 nan_frac = float(np.mean(~np.isfinite(crop_raw)))                 # todos los NaN (informativo)
 hole_frac = holes.fraction(y0, x0, side)                         # solo zonas vacias grandes: decide la validez
 crop, (p_lo, p_hi) = stretch(crop_raw)
 
 left, right = st.columns([3, 2])
-left.image(preview_with_box(data, y0, x0, side), caption="Imagen completa (%dx%d). Recuadro = región de estudio." % (W, H), use_container_width=True)
+left.image(preview_with_box(field, y0, x0, side), caption="Imagen completa (%dx%d). Recuadro = región de estudio." % (W, H), use_container_width=True)
 right.image(crop, caption="Región: x=%d–%d, y=%d–%d" % (x0, x0 + side, y0, y0 + side), use_container_width=True, clamp=True)
 right.markdown(
     "<div class='cms-prov'>Telescopio / instrumento: %s / %s<br>Filtro: %s<br>Objeto (cabecera): %s<br>"

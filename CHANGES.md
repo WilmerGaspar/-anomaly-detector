@@ -414,3 +414,48 @@ descriptor sobrevive al FDR. Interés morfológico".
 72. Con el semáforo en ⚪, 🟡 o 🟠, el estado pasa a `known_or_weak`,
     `explained_by_confounder` o `unconfirmed`, y el veredicto enumera las
     comprobaciones que fallaron. Esos estados figuran en `followup.reject_if`.
+
+## La app se caía con archivos grandes (memoria)
+
+"Oh no. Error running app" tras analizar el drz de HST WFPC2 (212 MB, extensiones
+SCI + WHT + CTX). Streamlit Cloud garantiza ~690 MB de memoria (hasta 2.7 GB si el
+servidor tiene sitio) y la app llegaba a **1.06 GB**: el archivo entero se guardaba
+como bytes en la sesión, más las copias al descargarlo y al leerlo.
+
+73. **El archivo va a disco**, no a la memoria de la sesión: MAST y "URL directa"
+    descargan por bloques a una carpeta propia de la sesión; la subida se copia a
+    disco por trozos y se borra del gestor de Streamlit (si no, seguía en memoria
+    hasta pulsar la X).
+74. **La imagen tampoco se carga entera**: una sola pasada por bloques de 512 filas
+    calcula la miniatura, el mapa de zonas vacías y los límites de los píxeles
+    válidos; la región de estudio se lee del disco al elegirla. Comprobado en 14
+    extensiones de los FITS de prueba: mismo mapa de vacíos, misma región por
+    defecto y mismos píxeles que antes, así que los resultados no cambian.
+75. Pico de memoria medido (proceso de Streamlit completo, con análisis):
+
+    | Archivo                                   | Antes   | Ahora  |
+    |-------------------------------------------|---------|--------|
+    | drz HST 212 MB, desde MAST / URL          | 1.06 GB | 400 MB |
+    | drz HST 212 MB, subido                    | 1.07 GB | 578 MB |
+    | imagen 10000×10000 (381 MB), desde URL    | 950 MB  | 446 MB |
+
+    El pico de la subida lo pone Streamlit al recibir el archivo (~2× su tamaño),
+    antes de que la app lo vea. Por eso la subida queda en 200 MB (el valor por
+    defecto, ahora explícito en `.streamlit/config.toml`) y la app indica usar MAST
+    o URL para archivos mayores.
+76. Las carpetas de sesiones sin uso en 6 h se borran (Streamlit no avisa cuando
+    una sesión termina y cada carpeta puede ocupar 400 MB). Si un usuario vuelve
+    después, la app le pide volver a cargar el archivo en vez de fallar.
+77. Error encontrado al probar: analizar una extensión constante (p. ej. un ERR
+    uniforme) hacía caer la ventana φ (espectro todo cero). Ahora da "La región no
+    tiene variación" y el semáforo 🔴.
+78. Radio: la carga de datos tenía el mismo riesgo (todo a memoria y a float64).
+    Tope de 64 MB por archivo (se comprueba antes de leerlo) y 4 millones de
+    valores. Medido fuera de la app: periodicidad con 4 M muestras, pico 318 MB;
+    con 16 M, 966 MB.
+79. Radio: la búsqueda de deriva prueba todas las derivas a resolución completa
+    (un canal en toda la observación). Con un espectrograma de 1024 × 1024 y
+    ±1 Hz/s eran 6829 derivas × 20 barridos: ~25 min, que para el usuario es un
+    cuelgue. Ahora hay un tope de cálculo (~1 min): se conserva el paso y se acorta
+    el rango, y el resultado dice qué rango se buscó y cómo ampliarlo (promediar en
+    tiempo). Los ejemplos de la biblioteca no cambian (no llegan al tope).

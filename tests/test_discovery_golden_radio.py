@@ -121,6 +121,13 @@ def test_phi_rings_detected_but_not_3_2_rings(seed):
     assert not phi_scale_test(other, n_null=500, seed=seed)["alert"]
 
 
+@pytest.mark.parametrize("value", [0.0, 1.0])
+def test_phi_constant_image_does_not_crash(value):
+    # Una extension ERR uniforme hacia caer la app (espectro todo cero -> array vacio).
+    r = phi_scale_test(np.full((300, 300), value))
+    assert r["p"] is None and r["alert"] is False and "variación" in r["note"]
+
+
 # ---------------------------------------------------------------- radio
 
 def test_periodicity_noise_and_pulsar():
@@ -150,6 +157,20 @@ def test_drift_tone_and_fixed_rfi():
     assert fixed["detected"] and fixed["likely_rfi"]
     noise = rs.drift_search(np.random.default_rng(3).standard_normal((64, 256)), 3.0, 10.0, n_null=9)
     assert not noise["detected"]
+    assert not r["range_limited"] and r["drift_range_hz_s"] >= 1.0
+
+
+def test_drift_budget_keeps_step_and_says_range(monkeypatch):
+    # 1024 x 1024 con ±1 Hz/s tardaba ~25 min. Con el tope: mismo paso, rango menor y avisado.
+    # Aqui el tope se reduce para que la prueba sea rapida: 64 x 256 x 10 barridos x 41 derivas.
+    monkeypatch.setattr(rs, "DRIFT_WORK_MAX", 64 * 256 * 10 * 41)
+    inside = rs.drift_search(rs.gen_drifting_tone(nchan=256, drift=0.05, amp=0.6, f_start_chan=100, seed=1), 3.0, 10.0, n_null=9)
+    step = 3.0 / (64 * 10.0)
+    assert inside["range_limited"] and inside["drift_step_hz_s"] == step
+    assert abs(inside["drift_range_hz_s"] - 20 * step) < 1e-12
+    assert inside["detected"] and abs(inside["drift_hz_s"] - 0.05) < 0.01
+    outside = rs.drift_search(rs.gen_drifting_tone(nchan=256, drift=-0.15, amp=0.6, f_start_chan=150, seed=1), 3.0, 10.0, n_null=9)
+    assert not outside["detected"] and "Rango buscado" in outside["note"]
 
 
 def test_crossmatch_with_harmonics():

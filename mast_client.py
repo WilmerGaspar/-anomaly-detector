@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+import os
 from pathlib import Path
 
 IMAGE_SUFFIXES = ("i2d.fits", "drc.fits", "drz.fits", "cal.fits", "flc.fits", "flt.fits", "sci.fits")
@@ -266,17 +267,24 @@ def _safe_name(filename):
 def download_product(uri, filename, max_mb=MAX_CLOUD_MB, size_mb=None):
     if size_mb is not None and size_mb > max_mb:
         raise RuntimeError("El archivo pesa %.0f MB y el tope es %.0f MB. Elige un cal/flt más pequeño." % (size_mb, max_mb))
+    import shutil
+    import tempfile
     Observations = _obs()
-    tmp = Path("/tmp/cms80_mast")
-    tmp.mkdir(parents=True, exist_ok=True)
+    # Carpeta propia por descarga: quien llama se lleva el archivo (set_field lo mueve) y dos
+    # sesiones que bajen el mismo producto no deben pisarse.
+    tmp = Path(tempfile.mkdtemp(prefix="cms80_mast_"))
     dest = tmp / _safe_name(filename)
-    result = Observations.download_file(uri, local_path=str(dest))
-    status = result[0] if isinstance(result, tuple) and result else result
-    if str(status).upper() not in ("COMPLETE", "SKIPPED") or not dest.exists():
-        raise RuntimeError("La descarga de %s falló (estado: %s)." % (filename, result))
-    if dest.stat().st_size > max_mb * 1024 * 1024:
-        raise RuntimeError("El FITS pesa %.0f MB y el tope es %.0f MB." % (dest.stat().st_size / 1048576, max_mb))
-    return dest.read_bytes()
+    try:
+        result = Observations.download_file(uri, local_path=str(dest))
+        status = result[0] if isinstance(result, tuple) and result else result
+        if str(status).upper() not in ("COMPLETE", "SKIPPED") or not dest.exists():
+            raise RuntimeError("La descarga de %s falló (estado: %s)." % (filename, result))
+        if dest.stat().st_size > max_mb * 1024 * 1024:
+            raise RuntimeError("El FITS pesa %.0f MB y el tope es %.0f MB." % (dest.stat().st_size / 1048576, max_mb))
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return str(dest)          # ruta en disco: leerlo como bytes duplicaba la memoria (drz HST de 212 MB)
 
 
 def download_url(url, max_mb=MAX_CLOUD_MB, timeout=TIMEOUT_SEC):
@@ -286,11 +294,24 @@ def download_url(url, max_mb=MAX_CLOUD_MB, timeout=TIMEOUT_SEC):
         raise ValueError("La URL debe empezar con https:// o http://")
     cap = int(max_mb * 1024 * 1024)
     req = urllib.request.Request(url, headers={"User-Agent": "CMS-80/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        length = resp.headers.get("Content-Length")
-        if length and int(length) > cap:
-            raise RuntimeError("El archivo pesa %.0f MB y el tope es %.0f MB." % (int(length) / 1048576, max_mb))
-        data = resp.read(cap + 1)
-    if len(data) > cap:
-        raise RuntimeError("El archivo supera el tope de %.0f MB." % max_mb)
-    return data
+    import tempfile
+    fd, dest = tempfile.mkstemp(prefix="cms80_url_", suffix=".fits")
+    total = 0
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp, os.fdopen(fd, "wb") as fh:
+            length = resp.headers.get("Content-Length")
+            if length and int(length) > cap:
+                raise RuntimeError("El archivo pesa %.0f MB y el tope es %.0f MB." % (int(length) / 1048576, max_mb))
+            while True:                                   # a disco por bloques, sin cargarlo entero
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > cap:
+                    raise RuntimeError("El archivo supera el tope de %.0f MB." % max_mb)
+                fh.write(chunk)
+    except Exception:
+        if os.path.exists(dest):
+            os.remove(dest)
+        raise
+    return dest

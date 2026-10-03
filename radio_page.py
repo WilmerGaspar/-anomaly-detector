@@ -11,6 +11,10 @@ import streamlit as st
 import radio_signals as rs
 
 GREEN, DIM, ACCENT = "#33ff66", "#2a5a35", "#ffb347"
+# Memoria de Streamlit Cloud (~690 MB garantizados). Medido fuera de la app: periodicidad con
+# 4 M muestras, pico 318 MB; con 16 M, 966 MB (la app se caeria).
+MAX_RADIO_VALUES = 4_000_000
+MAX_RADIO_MB = 64
 
 
 def _layout(fig, height=300, **kw):
@@ -29,6 +33,9 @@ def _verdict(res):
 
 def _load_array(up):
     name = up.name.lower()
+    if up.size > MAX_RADIO_MB * 1048576:
+        raise ValueError("pesa %.0f MB y el máximo es %d MB. Recórtalo o promédialo (binning) antes de cargarlo."
+                         % (up.size / 1048576, MAX_RADIO_MB))
     raw = up.getvalue()
     if name.endswith(".npy"):
         return np.load(io.BytesIO(raw), allow_pickle=False)
@@ -98,6 +105,9 @@ def _upload():
     if up is not None and st.button("Usar este archivo", type="primary"):
         try:
             arr = _load_array(up)
+            if arr.size > MAX_RADIO_VALUES:
+                raise ValueError("tiene %.1f millones de valores y el máximo es %.0f millones (memoria del servidor). "
+                                 "Recórtalo o promédialo (binning) antes de cargarlo." % (arr.size / 1e6, MAX_RADIO_VALUES / 1e6))
             if kind.startswith("Serie"):
                 arr = arr[:, -1] if arr.ndim == 2 else arr
                 st.session_state["radio"] = {"kind": "series", "data": arr.astype(float), "dt": dt, "label": up.name}
@@ -113,7 +123,8 @@ def _upload():
             st.error("No se pudo leer el archivo: %s" % exc)
     st.caption("Fuentes públicas (descarga allí; esta app no se conecta a ellas): " +
                " · ".join("[%s](%s)" % (n, u) for n, u, _ in rs.PUBLIC_CATALOGS) +
-               ". Formatos de radiotelescopio (filterbank .fil, HDF5 .h5) hay que convertirlos antes a .npy o .fits.")
+               ". Formatos de radiotelescopio (filterbank .fil, HDF5 .h5) hay que convertirlos antes a .npy o .fits. "
+               "Máximo %d MB y %.0f millones de valores." % (MAX_RADIO_MB, MAX_RADIO_VALUES / 1e6))
 
 
 def _show(res, data):

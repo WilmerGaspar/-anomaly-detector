@@ -48,3 +48,13 @@ def test_bh_curve_and_flatten():
     assert curve[1]["threshold"] == 0.05
     rows = flatten_numeric({"p": {"x": 1.0, "y": {"z": 2}, "s": "txt", "flag": True, "nan": float("nan")}})
     assert {(r["plugin"], r["descriptor"]) for r in rows} == {("p", "x"), ("p", "y.z")}
+
+
+def test_surrogate_spectrum_matches_without_window():
+    # IAAFT copia el espectro sin ventana: comparado asi coincide; con ventana Hanning se separaba
+    # 2-16x a k bajo y la app decia "el nulo no es valido" sin serlo.
+    from analytics import full_analytics
+    img = _gaussian_field(128, beta=2.5)
+    sp = full_analytics((img - img.min()) / np.ptp(img), seed=1)["spectrum"]
+    ratio = np.array(sp["p_surrogate"]) / np.array(sp["p_nowindow"])
+    assert np.all(np.abs(np.log10(ratio)) < 0.05)

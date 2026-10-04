@@ -99,9 +99,14 @@ def _tab_spectrum(A):
     sp = A["spectrum"]
     fit = sp["fit"]
     k, p, ps = np.array(sp["k"]), np.array(sp["p"]), np.array(sp["p_surrogate"])
+    pn = np.array(sp["p_nowindow"]) if sp.get("p_nowindow") else None
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=k, y=p, mode="lines+markers", marker=dict(size=4), line=dict(color=ACCENT), name="región"))
-    fig.add_trace(go.Scatter(x=k, y=ps, mode="lines", line=dict(color=DIM), name="subrogado IAAFT"))
+    fig.add_trace(go.Scatter(x=k, y=p, mode="lines+markers", marker=dict(size=4), line=dict(color=ACCENT), name="región (ventana Hanning)"))
+    if pn is not None:
+        fig.add_trace(go.Scatter(x=k, y=pn, mode="lines", line=dict(color=GREEN), name="región sin ventana"))
+        fig.add_trace(go.Scatter(x=k, y=ps, mode="lines", line=dict(color=DIM, dash="dash"), name="subrogado IAAFT sin ventana"))
+    else:                    # resultados antiguos: el subrogado se medía igual pero la región con ventana
+        fig.add_trace(go.Scatter(x=k, y=ps, mode="lines", line=dict(color=DIM), name="subrogado IAAFT"))
     if np.isfinite(fit["beta"]):
         kk = np.linspace(fit["k_min"], fit["k_max"], 20)
         fig.add_trace(go.Scatter(x=kk, y=10 ** (fit["intercept"]) * kk ** (-fit["beta"]), mode="lines",
@@ -115,8 +120,12 @@ def _tab_spectrum(A):
     c2.caption("Rango del ajuste: k = %.2f–%.2f (%d puntos)." % (fit["k_min"], fit["k_max"], fit["n_points"]))
     c2.caption("Referencias: β≈11/3 turbulencia de Kolmogorov (densidad), β≈2 bordes/escalones, β≈0 ruido blanco. "
                "Un R² bajo indica que no hay ley de potencia única (dos regímenes o un pico).")
-    c2.caption("El subrogado tiene el mismo espectro por construcción: las curvas deben solaparse. "
-               "Si no lo hacen, el nulo no es válido para esta región.")
+    c2.caption("El subrogado copia el espectro sin ventana: la curva verde y la discontinua deben solaparse; si no, "
+               "el nulo no es válido para esta región. La curva con ventana (naranja) es la que se ajusta: reduce las "
+               "fugas del borde y por eso queda más baja a k pequeño.")
+    if pn is not None and len(pn) and len(ps) == len(pn):
+        dev = float(np.max(np.abs(np.log10(np.maximum(ps, 1e-300) / np.maximum(pn, 1e-300)))))
+        (c2.success if dev < 0.1 else c2.warning)("Subrogado frente a región (sin ventana): diferencia máxima %.0f %%." % (100 * (10 ** dev - 1)))
 
 
 def _tab_scales(A):

@@ -13,12 +13,15 @@ from scoring import _cheap_metrics, _flatness, downsample_for_null, iaaft_surrog
 
 # ---------------------------------------------------------------- espectro
 
-def radial_power_spectrum(image, n_bins=None):
-    """P(k) promediado en anillos. k en ciclos/pixel (0, 0.5]."""
+def radial_power_spectrum(image, n_bins=None, window=True):
+    """P(k) promediado en anillos. k en ciclos/pixel (0, 0.5].
+    window=True (Hanning) reduce las fugas del borde para ajustar beta. Para comparar con un
+    subrogado IAAFT hay que usar window=False: IAAFT copia el espectro sin ventana, y con
+    ventana las dos curvas se separan ~2x a k bajo aunque el nulo sea correcto (medido)."""
     img = np.asarray(image, dtype=np.float64)
     img = img - img.mean()
     h, w = img.shape
-    win = np.outer(np.hanning(h), np.hanning(w))            # reduce fugas del borde
+    win = np.outer(np.hanning(h), np.hanning(w)) if window else 1.0
     power = np.abs(np.fft.fftshift(np.fft.fft2(img * win))) ** 2
     ky = np.fft.fftshift(np.fft.fftfreq(h))
     kx = np.fft.fftshift(np.fft.fftfreq(w))
@@ -164,8 +167,10 @@ def full_analytics(image, seed=None, valid=None):
     small = downsample_for_null(image, max_side=256)
     k, p = radial_power_spectrum(small)
     surr = iaaft_surrogate(small, np.random.default_rng(seed))
-    ks, ps = radial_power_spectrum(surr)
-    return {"spectrum": {"k": k.tolist(), "p": p.tolist(), "p_surrogate": ps.tolist(), "fit": fit_power_law(k, p)},
+    _, pn = radial_power_spectrum(small, window=False)
+    _, ps = radial_power_spectrum(surr, window=False)
+    return {"spectrum": {"k": k.tolist(), "p": p.tolist(), "p_nowindow": pn.tolist(), "p_surrogate": ps.tolist(),
+                         "fit": fit_power_law(k, p)},
             "scales": scale_profile(image, seed=seed),
             "increments": increment_histograms(image, seed=seed),
             "local_map": local_significance_map(image, seed=seed, valid=valid)}

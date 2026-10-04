@@ -523,3 +523,21 @@ sin enmascarar: la prueba no podía descartarlos.
     fuentes puntuales": dice que se enmascararon y que la señal se mantiene.
 90. El JSON tenía `NaN` (p. ej. `beta_se`), que no es JSON válido y hace fallar a otros
     lectores. Ahora NaN e infinito se escriben como `null`.
+
+## La gráfica del espectro hacía dudar de un nulo correcto (NIRCam F200W real)
+
+`jw02727002001_02105_00005_nrcb1_i2d`, región de 1024 px: la curva del subrogado salía
+2.4 veces por encima de la región a k bajo (15 veces en un MIRI anterior), y la app
+decía "si no se solapan, el nulo no es válido".
+
+91. El subrogado IAAFT copia el espectro **sin ventana**, y la gráfica lo medía con
+    ventana Hanning. Sin ventana coinciden exactamente: 0 % de diferencia en 4 FITS
+    reales y sintéticos. Con ventana se separaban de 2 a 16 veces incluso en un campo
+    sin estrellas. Ahora la pestaña compara las dos curvas sin ventana y muestra la
+    diferencia máxima. La curva con ventana se sigue usando para ajustar β. El nulo y
+    los resultados no cambian: solo cambia la gráfica.
+92. Comprobado: rellenar los huecos de las estrellas con ruido blanco **no fabrica
+    estructura** aunque el ruido real esté correlacionado (drizzle). Con 6.7 % del área
+    enmascarada, 1 de 10 campos sin estructura pasa el FDR, igual que sin máscara. La
+    subida de 3/4 a 4/4 al enmascarar 1015 estrellas en este NIRCam es compatible con
+    estructura extendida que las estrellas tapaban.

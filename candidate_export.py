@@ -87,5 +87,21 @@ def _thin_descriptors(plugin_results):
             out[plugin] = {k: src.get(k) for k in keys if k in src}
     return out
 
+def _json_safe(o):
+    """NaN e infinito no existen en JSON (Python escribia NaN y otros lectores fallan): -> null."""
+    import math
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: _json_safe(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_json_safe(v) for v in o]
+    if hasattr(o, "item") and getattr(o, "ndim", 1) == 0:          # escalares de numpy
+        return _json_safe(o.item())
+    if hasattr(o, "tolist"):
+        return _json_safe(o.tolist())
+    return o
+
+
 def dumps_candidate(card):
-    return json.dumps(card, indent=2, ensure_ascii=False, default=str)
+    return json.dumps(_json_safe(card), indent=2, ensure_ascii=False, default=str, allow_nan=False)

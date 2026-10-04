@@ -56,6 +56,25 @@ def test_untested_controls_never_count_in_favour():
     assert evaluate(_card(), replicate=REP)["level"] == "unconfirmed"
 
 
+def test_many_unmasked_compact_objects_cannot_make_green():
+    # MIRI F770W real: 84 fuentes enmascaradas, 466 objetos compactos no puntuales sin enmascarar,
+    # FDR 3/4 tras enmascarar -> daba 🟢. La prueba no quito esos objetos: no comprobado.
+    real = dict(MASK_OK, n_masked=84, n_extended_rejected=466, masked_fraction=0.095, valid=True)
+    g = evaluate(_card(morphology={"n_point_sources": 34}), masked=real, replicate=REP)
+    assert g["level"] == "unconfirmed"
+    assert "466" in next(c["detail"] for c in g["checks"] if c["check"] == "No la explican las fuentes puntuales")
+    few = dict(real, n_extended_rejected=5)                   # pocos: la prueba sigue valiendo
+    assert evaluate(_card(morphology={"n_point_sources": 34}), masked=few, replicate=REP)["level"] == "robust"
+
+
+def test_candidate_json_has_no_nan():
+    import json
+    from candidate_export import dumps_candidate
+    txt = dumps_candidate({"a": float("nan"), "b": [1.0, float("inf")], "c": np.float32(2.5), "d": np.array([np.nan, 1.0])})
+    assert json.loads(txt) == {"a": None, "b": [1.0, None], "c": 2.5, "d": [None, 1.0]}
+    assert "NaN" not in txt
+
+
 def test_levels():
     assert evaluate(_card(), masked=MASK_OK, replicate=REP)["level"] == "robust"
     assert evaluate(_card(analysis={"empty_area_fraction": 0.2}), masked=MASK_OK, replicate=REP)["level"] == "invalid"

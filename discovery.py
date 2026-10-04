@@ -47,6 +47,7 @@ def _fill_smooth_plus_noise(lin, masked, rng, sigma=4.0):
 
 
 MAX_MASK_FRACTION = 0.10
+EXTENDED_MAX = 10   # objetos compactos no puntuales tolerados sin enmascarar (ver evaluate)
 MASK_NSIG = 5.0     # medido: a 10 sigma quedaban estrellas debiles que mantenian el FDR (1 de 4 campos)
 
 
@@ -98,6 +99,7 @@ def mask_point_sources(raw, seed=0, max_radius=25, nsig=MASK_NSIG, spike_pixels=
     out = _fill_smooth_plus_noise(lin, masked, rng) if masked.any() else lin.copy()
     frac = float(masked.mean())
     return out, {"n_masked": int(len(src)), "n_extended_rejected": int(n_extended), "masked_fraction": frac,
+                 "positions": src.tolist() if len(src) else [],
                  "radii": radii, "spike_area_fraction": n_spike_px / masked.size, "nsig": nsig,
                  # Rellenar mas del 10 % de la imagen fabrica estructura (medido: emision extendida
                  # sin estrellas pasaba de FDR 0/4 a 3-4/4 con 17-24 % enmascarado).
@@ -234,6 +236,15 @@ def evaluate(card, masked=None, replicate=None, references=None):
     if masked is not None and not masked.get("valid", True):
         msg = ("prueba no válida: habría que enmascarar el %.0f %% del área (máximo %.0f %%); no comprobado"
                % (100 * masked["masked_fraction"], 100 * MAX_MASK_FRACTION))
+        add("No la explican las fuentes puntuales", False, msg)
+        add("No la explican los picos de difracción", n_spk == 0, msg if n_spk else "sin picos de difracción")
+    elif masked is not None and masked.get("n_extended_rejected", 0) > max(EXTENDED_MAX, masked.get("n_masked", 0)):
+        # La mayoria de los objetos compactos no son puntuales (galaxias, nudos de emision) y
+        # quedan sin enmascarar: la prueba no los quita, asi que no puede descartarlos. Medido en
+        # un MIRI F770W real: 84 enmascaradas, 466 sin enmascarar, FDR 3/4 -> salia 🟢.
+        msg = ("no comprobado: %d objetos compactos no son puntuales (galaxias o nudos) y quedan sin "
+               "enmascarar, frente a %d fuentes enmascaradas; sin modelo de PSF no se pueden separar"
+               % (masked["n_extended_rejected"], masked.get("n_masked", 0)))
         add("No la explican las fuentes puntuales", False, msg)
         add("No la explican los picos de difracción", n_spk == 0, msg if n_spk else "sin picos de difracción")
     elif masked is not None:

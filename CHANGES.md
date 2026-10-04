@@ -505,3 +505,21 @@ datos. La causa eran dos descriptores que no medían nada:
 86. NOS empírico: su fondo son distribuciones normales escritas a mano, no cielo real.
     Ahora lo dice en el JSON (`reference_is_real_data: false`) y en la app. No interviene
     en el semáforo ni en el estado.
+
+## Falso 🟢 en un MIRI F770W real (jw01192006001_03103_00002)
+
+Región de 598 px: FDR 3/4; se enmascararon 84 fuentes (9.5 % del área) y el FDR seguía en
+3/4, así que el semáforo dio 🟢. Pero el detector había encontrado otros **466 objetos
+compactos que no son puntuales** (galaxias o nudos de emisión). Esos objetos quedaron
+sin enmascarar: la prueba no podía descartarlos.
+
+87. Si los objetos compactos no puntuales sin enmascarar superan a las fuentes
+    enmascaradas (y son más de 10), la comprobación "no la explican las fuentes
+    puntuales" queda como **no comprobado** y el semáforo da 🟠 como máximo. Los
+    controles anteriores no cambian (filamentos 🟢, estrellas 🟡, log-normal ⚪).
+88. La ventana φ usaba las 445 detecciones compactas, la mayoría extendidas. Ahora usa
+    las mismas fuentes puntuales que la prueba de enmascarado.
+89. Cuando el semáforo es 🟢, el veredicto ya no repite "el FDR puede deberse a las
+    fuentes puntuales": dice que se enmascararon y que la señal se mantiene.
+90. El JSON tenía `NaN` (p. ej. `beta_se`), que no es JSON válido y hace fallar a otros
+    lectores. Ahora NaN e infinito se escriben como `null`.

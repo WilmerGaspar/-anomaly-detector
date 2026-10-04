@@ -47,6 +47,7 @@ def _fill_smooth_plus_noise(lin, masked, rng, sigma=4.0):
 
 
 MAX_MASK_FRACTION = 0.10
+INSENSITIVE_Z = -3.0  # z global por debajo: el nulo tiene mas estructura que la region (ver evaluate)
 EXTENDED_MAX = 10   # objetos compactos no puntuales tolerados sin enmascarar (ver evaluate)
 MASK_NSIG = 5.0     # medido: a 10 sigma quedaban estrellas debiles que mantenian el FDR (1 de 4 campos)
 
@@ -285,5 +286,14 @@ def evaluate(card, masked=None, replicate=None, references=None):
     else:
         level = "robust"
     icon, title, meaning = LEVELS[level]
+    z = (card.get("structure_test") or {}).get("z_score")
+    insensitive = level == "none" and z is not None and z < INSENSITIVE_Z
+    if insensitive:
+        # La region es MENOS irregular que su nulo (p = 1): en campos dominados por estrellas el
+        # IAAFT reparte los pixeles brillantes y los subrogados tienen mas saltos que el cielo
+        # real. Medido en un WFC3-IR real (SKYSURF F125W, 621 fuentes): z = -16, curtosis 7 frente
+        # a 18 del nulo. "Nada que el ruido explique" seria afirmar de mas.
+        meaning = ("Sin señal, pero la región es menos irregular que su nulo (z = %.1f): con este campo la prueba "
+                   "pierde sensibilidad y un ⚪ no descarta estructura. Prueba una región con menos estrellas." % z)
     return {"level": level, "icon": icon, "title": title, "meaning": meaning, "checks": checks,
-            "novelty": novelty, "novelty_threshold_z": NOVELTY_Z}
+            "novelty": novelty, "novelty_threshold_z": NOVELTY_Z, "insensitive": insensitive}

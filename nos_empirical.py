@@ -106,6 +106,12 @@ def score_with_isoforest(plugin_results):
     emp["version"] = "v1_isoforest"
     emp["vector"] = vectorize(plugin_results).tolist()
     emp["note"] = "vector sin fibonacci ni entropy. iso y mahalanobis separados. fondo=%s" % source
+    if source == "synthetic_sky":
+        # El fondo son distribuciones normales escritas a mano (synthetic_sky_corpus), no
+        # mediciones de cielo real: la puntuacion no puede usarse como evidencia de rareza.
+        emp["reference_is_real_data"] = False
+        emp["warning"] = ("Fondo inventado (distribuciones escritas a mano, no cielo real): esta puntuación "
+                          "NO mide rareza. Para novedad real usa la pestaña Novedad con tus propios análisis.")
     return emp
 
 def morphological_nos_v1(plugin_results, prior_fallback=None):

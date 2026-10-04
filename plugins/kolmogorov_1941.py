@@ -108,7 +108,6 @@ class Kolmogorov1941:
             "intermittency_factor": inter,
             "intermittency_clipped": clipped,
             "turbulence_intensity": float(np.clip(1.0 - (inter if np.isfinite(inter) else 0.0) * 0.5, 0.0, 1.0)),
-            "integral_scale": float(np.mean(img.shape) / 4.0),
             "isotropic_score": iso if np.isfinite(iso) else float("nan"),
         }
 

@@ -169,37 +169,55 @@ def _row(rec, fallback_target=""):
     }
 
 
+def _count(fn, **kw):
+    try:
+        return int(fn(**kw))
+    except Exception:
+        return None
+
+
 def search_observations_detailed(target, missions, radius_deg=0.12, limit=500, images_only=True):
-    """Devuelve filas + conteos reales para mostrar al usuario."""
+    """Devuelve filas + conteos reales para mostrar al usuario.
+
+    MAST filtra por mision y tipo de dato en el servidor y solo se descarga una pagina de
+    `limit` filas. Antes se pedian todas las observaciones de todas las misiones en el radio
+    y se filtraban aqui: en el campo ultraprofundo de Hubble (de lo mas observado del cielo)
+    esa tabla llenaba la memoria y la app se caia al pulsar "Buscar en MAST"."""
     Observations = _obs()
+    radius = "%s deg" % radius_deg
+    crit = {"objectname": target.strip(), "radius": radius}
+    if missions:
+        crit["obs_collection"] = sorted({a for m in missions for a in MISSION_ALIASES.get(m.upper(), {m})})
+    if images_only:
+        crit["dataproduct_type"] = "image"
     last, table = None, None
     for _ in range(2):
         try:
-            table = Observations.query_object(target.strip(), radius="%s deg" % radius_deg)
+            table = Observations.query_criteria(pagesize=int(limit), page=1, **crit)
             last = None
             break
         except Exception as exc:
             last = exc
     if last is not None:
         raise RuntimeError("MAST no respondió (timeout o red). Reintenta o carga un FITS local. Detalle: %s" % last)
+    # Conteos (solo un numero cada uno): todas las misiones, la mision elegida y sus imagenes.
+    n_total = _count(Observations.query_object_count, objectname=target.strip(), radius=radius)
+    n_mission = _count(Observations.query_criteria_count, **{k: v for k, v in crit.items() if k != "dataproduct_type"})
+    n_images = _count(Observations.query_criteria_count, **crit) if images_only else n_mission
     out = {"target": target, "radius_deg": radius_deg, "missions": list(missions or []),
-           "n_total": 0, "n_mission": 0, "n_images": 0, "n_shown": 0, "truncated": False, "rows": []}
-    if table is None or len(table) == 0:
-        return out
-    out["n_total"] = int(len(table))
-    for rec in table:
+           "n_total": n_total, "n_mission": n_mission, "n_images": n_images, "n_shown": 0, "truncated": False, "rows": []}
+    for rec in (table if table is not None else []):
         mission = str(_get(rec, "obs_collection", "") or _get(rec, "project", ""))
         if missions and not _mission_ok(mission, missions):
             continue
-        out["n_mission"] += 1
-        dtype = str(_get(rec, "dataproduct_type", "")).lower()
-        if images_only and dtype != "image":
+        if images_only and str(_get(rec, "dataproduct_type", "")).lower() != "image":
             continue
-        out["n_images"] += 1
-        if len(out["rows"]) < limit:
-            out["rows"].append(_row(rec, target))
+        out["rows"].append(_row(rec, target))
+        if len(out["rows"]) >= limit:
+            break
     out["n_shown"] = len(out["rows"])
-    out["truncated"] = out["n_shown"] < out["n_images"]
+    n_rows = len(table) if table is not None else 0
+    out["truncated"] = bool(n_images is not None and out["n_shown"] < n_images) or n_rows >= limit
     return out
 
 

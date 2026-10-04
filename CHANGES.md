@@ -570,3 +570,18 @@ Cloud (~690 MB).
     total es de 371 MB.
 95. Test `test_memory_budget`: el análisis a lado máximo debe quedar por debajo de 250 MB
     sobre su base. Mide 176 MB con 1024 px; con 2048 px daría 498 MB y el test fallaría.
+
+## "Oh no" al pulsar "Buscar en MAST" con HLSP + HUDF
+
+La búsqueda pedía a MAST **todas** las observaciones de **todas** las misiones en el radio
+(`query_object`) y filtraba la misión y el tipo después, en la app. El campo ultraprofundo
+de Hubble es de las zonas más observadas del cielo (Hubble, JWST, Chandra…): esa tabla
+llenaba la memoria antes de enseñar nada.
+
+96. MAST filtra en el servidor por colección (`obs_collection`) y tipo (`dataproduct_type =
+    image`), y solo se descarga una página de 500 filas (`page=1`; sin `page`, astroquery
+    descarga todas las páginas). Los totales de la pantalla salen de consultas de recuento,
+    que devuelven solo un número.
+97. Tests con un MAST simulado: filtros enviados al servidor, una sola página, y
+    `query_object` no se usa. Desde este entorno no hay acceso a MAST, así que no se
+    pudo probar contra el servidor real.

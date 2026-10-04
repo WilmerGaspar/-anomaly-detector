@@ -44,7 +44,11 @@ st.markdown("""<style>
 from mast_client import CURATED, MAST_ACK, MAX_CLOUD_MB, NOTES  # noqa: E402
 
 SEED = 80
-MAX_ANALYSIS_SIDE = 2048
+# Lado maximo de la region. Medido (drz de HST, proceso sin Streamlit): con 1024 px el analisis
+# llega a 313 MB; con 2048 px a 650 MB (enmascarado +384, Kolmogorov +288, fractal +217) y,
+# sumado a la app (~450 MB), pasaba del limite de Streamlit Cloud (~690 MB): "Oh no" en el
+# campo profundo de Hubble. Para mas area, analiza varias regiones.
+MAX_ANALYSIS_SIDE = 1024
 PREVIEW_SIDE = 900
 DEFAULT_SIDE = 1024
 MAX_EMPTY_FRACTION = 0.001   # zonas vacias grandes; medido: con 1 % ya aparecen falsos positivos (1 de 10)
@@ -636,7 +640,7 @@ def _slider(col, label, lo, hi, default):
 
 
 s1, s2, s3 = st.columns(3)
-side = _slider(s1, "Tamaño de la región (px)", 32, max_side, min(def_side, max_side))
+side = _slider(s1, "Tamaño de la región (px, máx. %d)" % MAX_ANALYSIS_SIDE, 32, max_side, min(def_side, max_side))
 y0 = _slider(s2, "Fila inicial (y)", 0, H - side, def_y + (def_side - side) // 2)
 x0 = _slider(s3, "Columna inicial (x)", 0, W - side, def_x + (def_side - side) // 2)
 if clean:

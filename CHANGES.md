@@ -550,3 +550,23 @@ quedan 509 objetos compactos no puntuales. La prueba no puede hacerse, y la app 
 
 93. Cuando varias comprobaciones fallan por el mismo motivo (fuentes puntuales y picos
     de difracción comparten la prueba de enmascarado), el veredicto lo dice una sola vez.
+
+## "Oh no" en el campo profundo de Hubble: región de 2048 px
+
+La región podía ampliarse hasta 2048 px. Muchos pasos del análisis crecen con el número de
+píxeles (4 veces más que con 1024). Medido con el drz de HST, en un proceso sin Streamlit:
+
+| Lado de la región | Pico del análisis |
+|---|---|
+| 1024 px | 313 MB |
+| 2048 px | 650 MB |
+
+A 2048 px los pasos que más suben son el enmascarado (+384 MB), Kolmogorov (+288 MB) y el
+fractal (+217 MB). Sumado a la app (~450 MB estabilizada) pasa del límite de Streamlit
+Cloud (~690 MB).
+
+94. `MAX_ANALYSIS_SIDE = 1024`; la etiqueta del deslizador dice el máximo. Para cubrir
+    más área, analiza varias regiones. En la app, con el deslizador al máximo, el pico
+    total es de 371 MB.
+95. Test `test_memory_budget`: el análisis a lado máximo debe quedar por debajo de 250 MB
+    sobre su base. Mide 176 MB con 1024 px; con 2048 px daría 498 MB y el test fallaría.

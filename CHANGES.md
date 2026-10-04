@@ -541,3 +541,12 @@ decía "si no se solapan, el nulo no es válido".
     enmascarada, 1 de 10 campos sin estructura pasa el FDR, igual que sin máscara. La
     subida de 3/4 a 4/4 al enmascarar 1015 estrellas en este NIRCam es compatible con
     estructura extendida que las estrellas tapaban.
+
+## MIRI F560W del mismo campo (jw01192006001_03101_00002)
+
+Misma región que el F770W de antes, en otro filtro: 🟠 "Sin confirmar". Es coherente:
+para quitar las 313 fuentes habría que tapar el 18 % del área (el máximo es 10 %), y
+quedan 509 objetos compactos no puntuales. La prueba no puede hacerse, y la app lo dice.
+
+93. Cuando varias comprobaciones fallan por el mismo motivo (fuentes puntuales y picos
+    de difracción comparten la prueba de enmascarado), el veredicto lo dice una sola vez.

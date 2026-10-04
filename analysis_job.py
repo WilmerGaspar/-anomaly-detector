@@ -90,7 +90,13 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
                 target["verdict"] = ("Las fuentes puntuales se enmascararon y la señal se mantiene (%s). "
                                      % ps_check["detail"]) + v.split("Elige una región sin fuentes brillantes. ", 1)[1]
     if new_state and materials.get("state") not in ("reject", "exploratory_only", "invalid_region"):
-        failed = [c["check"] + ": " + c["detail"] for c in gate["checks"] if not c["ok"]]
+        # Comprobaciones con el mismo motivo (fuentes puntuales y picos comparten la prueba) se
+        # juntan: antes el veredicto repetia la misma frase larga dos veces.
+        groups = {}
+        for c in gate["checks"]:
+            if not c["ok"]:
+                groups.setdefault(c["detail"], []).append(c["check"])
+        failed = [" / ".join(names) + ": " + detail for detail, names in groups.items()]
         verdict = "%s %s. %s" % (gate["icon"], gate["title"], " · ".join(failed) if failed else gate["meaning"])
         for target in (materials, cand["morphology"]):
             target["state"], target["verdict"] = new_state, verdict

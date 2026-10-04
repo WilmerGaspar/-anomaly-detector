@@ -38,7 +38,8 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
     """Devuelve el diccionario que la app guarda en st.session_state["results"] (sin "key")."""
     from analytics import full_analytics
     from candidate_export import build_candidate, dumps_candidate
-    from discovery import evaluate, fdr_replicate, fdr_without_point_sources, find_point_sources
+    import numpy as np
+    from discovery import evaluate, fdr_replicate, fdr_without_point_sources
     from golden import golden_window
     from materials_map import interpret
     from nos_morphological import morphological_nos
@@ -67,7 +68,9 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
     # disparan la curtosis de incrementos; la prueba enmascara desde 5 sigma.
     masked = fdr_without_point_sources(crop_raw, n_simulations=n_null, seed=seed + 2000,
                                        spike_pixels=rid.get("spike_pixels"), small_shape=rid.get("small_shape"))
-    golden = golden_window(crop, find_point_sources(crop_raw)[0], seed=seed)
+    # Ventana phi con las mismas fuentes puntuales que la prueba de enmascarado: antes usaba
+    # todas las detecciones compactas (445 en un MIRI F770W real, la mayoria nudos extendidos).
+    golden = golden_window(crop, np.array(masked.pop("positions", []), dtype=float).reshape(-1, 2), seed=seed)
     gate = evaluate(cand, masked=masked, replicate=replicate)
     cand["discovery_gate"] = {k: v for k, v in gate.items() if k != "novelty"}
     cand["discovery_controls"] = {"replicate": replicate, "point_sources_masked": masked}
@@ -78,6 +81,14 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
     # mientras el semaforo decia "explicado por un confusor" (HST WFPC2 real).
     new_state = {"none": "known_or_weak", "explained": "explained_by_confounder",
                  "unconfirmed": "unconfirmed"}.get(gate["level"])
+    ps_check = next((c for c in gate["checks"] if c["check"] == "No la explican las fuentes puntuales"), None)
+    if gate["level"] in ("robust", "pioneer") and ps_check and ps_check["ok"]:
+        # El aviso "el FDR puede deberse a las fuentes puntuales" ya se comprobo y no se cumple.
+        for target in (materials, cand["morphology"]):
+            v = target.get("verdict") or ""
+            if v.startswith("La región tiene ") and "Elige una región sin fuentes brillantes. " in v:
+                target["verdict"] = ("Las fuentes puntuales se enmascararon y la señal se mantiene (%s). "
+                                     % ps_check["detail"]) + v.split("Elige una región sin fuentes brillantes. ", 1)[1]
     if new_state and materials.get("state") not in ("reject", "exploratory_only", "invalid_region"):
         failed = [c["check"] + ": " + c["detail"] for c in gate["checks"] if not c["ok"]]
         verdict = "%s %s. %s" % (gate["icon"], gate["title"], " · ".join(failed) if failed else gate["meaning"])

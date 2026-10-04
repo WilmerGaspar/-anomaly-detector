@@ -459,3 +459,49 @@ como bytes en la sesión, más las copias al descargarlo y al leerlo.
     cuelgue. Ahora hay un tope de cálculo (~1 min): se conserva el paso y se acorta
     el rango, y el resultado dice qué rango se buscó y cómo ampliarlo (promediar en
     tiempo). Los ejemplos de la biblioteca no cambian (no llegan al tope).
+
+## Seguía cayéndose: la memoria crecía con cada análisis
+
+Tras el PR anterior la app volvió a caerse en Streamlit Cloud. Un análisis suelto ya
+cabía, pero Streamlit atiende a todas las sesiones en **un solo proceso**, guarda las
+sesiones cerradas un tiempo y glibc no devolvía al sistema la memoria liberada. Medido
+(8 análisis seguidos del drz de HST de 212 MB, cada uno en una sesión nueva, con
+Streamlit 1.65, la versión que instala ahora la nube): el proceso subía de 363 a
+572 MB sin estabilizarse, con pico de 676 MB. Streamlit Cloud garantiza ~690 MB.
+
+80. Ajustes de glibc al arrancar (`_tune_malloc` en `app.py`): los arrays de 1 MB o más
+    van siempre con mmap y se devuelven al sistema, y como mucho hay 2 reservas de
+    memoria en vez de una por hilo. Con los mismos 8 análisis el proceso se estabiliza
+    en ~450 MB, con pico de 535 MB. Con 3 pestañas abiertas a la vez encima de esos
+    análisis, el pico es de 550 MB.
+81. Probado y descartado: ejecutar el análisis en un proceso hijo. El hijo vuelve a
+    cargar numpy, scipy, skimage... (~300 MB) y el pico total subía a 676–759 MB.
+    El análisis pasa a `analysis_job.py` (mismo código, se puede probar sin Streamlit).
+82. El mapa de la región en la pestaña del mapa local se dibuja con 256 px como máximo
+    (media por bloques). Antes se enviaba la región entera (1 M de valores con 1024 px,
+    4 M con 2048) solo para un gráfico de 440 px.
+
+## Descriptores que devolvían números al azar
+
+Al comparar el análisis en dos procesos salieron resultados distintos con los mismos
+datos. La causa eran dos descriptores que no medían nada:
+
+83. `fractal_base`: `lacunarity` y `multifractality_index` eran `np.random.uniform`, y
+    `d1`/`d2` eran `0.95·d0` y `0.90·d0`. Ahora se miden:
+    - D1 y D2: dimensiones generalizadas de la medida de intensidad (Hentschel-Procaccia).
+    - multifractalidad = D0(medida) − D2.
+    - lacunaridad de caja deslizante (Allain-Cloitre) a 8 px, con su curva.
+
+    Ruido: lacunaridad 1.03 y multifractalidad 0. Grumos: 6.3 y 0.12. Filamentos
+    sintéticos: 2.6 y 0.01. D0 no cambia (el recuento por cajas es el mismo, vectorizado).
+84. `persistent_homology`: los números de Betti y la "entropía topológica" eran al azar.
+    Ahora se cuentan las componentes y los huecos de la máscara > media + 0.5σ, de al
+    menos max(16 px, 0.05 % del área). Anillo: β0 = 1, β1 = 1; dos bloques: 2 y 0.
+    Estos valores entran en las familias morfológicas, así que **la familia de un mismo
+    archivo ya no cambia entre ejecuciones** (antes podía pasar de "agregado" a
+    "mezcla").
+85. `kolmogorov_1941`: se quita `integral_scale`, que era un cuarto del tamaño de la
+    región y no una medida (nada lo usaba).
+86. NOS empírico: su fondo son distribuciones normales escritas a mano, no cielo real.
+    Ahora lo dice en el JSON (`reference_is_real_data: false`) y en la app. No interviene
+    en el semáforo ni en el estado.

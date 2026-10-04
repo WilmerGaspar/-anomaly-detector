@@ -153,7 +153,15 @@ def _tab_local(A, crop):
         return
     g = lm["grid"]
     fig = make_subplots(rows=1, cols=2, subplot_titles=["Región", "z local de %s" % lm["metric"]], horizontal_spacing=0.08)
-    fig.add_trace(go.Heatmap(z=np.asarray(crop)[::-1], colorscale="Greys", reversescale=True, showscale=False), row=1, col=1)
+    # Solo para mostrar: como mucho 256 px de lado (media por bloques). Con la region completa
+    # (1024 px = 1 M valores, 2048 px = 4 M) el grafico ocupaba decenas de MB por sesion y,
+    # analisis tras analisis, llevaba a Streamlit Cloud al limite de memoria.
+    show = np.asarray(crop, dtype=np.float32)
+    b = int(np.ceil(max(show.shape) / 256))
+    if b > 1:
+        h, w = (show.shape[0] // b) * b, (show.shape[1] // b) * b
+        show = show[:h, :w].reshape(h // b, b, w // b, b).mean(axis=(1, 3))
+    fig.add_trace(go.Heatmap(z=show[::-1], colorscale="Greys", reversescale=True, showscale=False), row=1, col=1)
     lim = float(np.clip(np.nanmax(np.abs(z)), 3.0, 10.0))     # escala de color saturada en |z| = 10
     fig.add_trace(go.Heatmap(z=z[::-1], zmin=-lim, zmax=lim, colorscale="RdBu", reversescale=True,
                              text=np.round(z[::-1], 1), texttemplate="%{text}", colorbar=dict(title="z")), row=1, col=2)
@@ -197,7 +205,11 @@ def _tab_families(R):
     st.caption("Análogo de laboratorio (descriptivo, no identificación): %s. Seguimiento: %s." % (mat.get("lab_analog"), mat.get("followup")))
     nos = R.get("nos")
     if isinstance(nos, dict) and nos:
-        with st.expander("NOS morfológico"):
+        with st.expander("NOS morfológico (orientativo, no es evidencia)"):
+            warn = (nos.get("empirical") or {}).get("warning")
+            if warn:
+                st.warning(warn)
+            st.caption("v0: distancia a 5 prototipos escritos a mano. No interviene en el semáforo ni en el estado.")
             st.json(nos)
 
 

@@ -585,3 +585,15 @@ llenaba la memoria antes de enseñar nada.
 97. Tests con un MAST simulado: filtros enviados al servidor, una sola página, y
     `query_object` no se usa. Desde este entorno no hay acceso a MAST, así que no se
     pudo probar contra el servidor real.
+
+## ⚪ con z muy negativo (WFC3-IR real, SKYSURF F125W)
+
+`hlsp_skysurf_hst_wfc3-ir_sv-1282_f125w`: FDR 0/4 con p = 1 en tres descriptores y z
+global = −16. La región tiene **menos** saltos que su nulo (curtosis a 1 px: 7.2 frente a
+17.7): con 621 estrellas, el IAAFT reparte los píxeles brillantes y los subrogados son más
+irregulares que el cielo real. El ⚪ decía "Nada que el ruido equivalente no explique",
+que es afirmar de más: aquí la prueba pierde sensibilidad.
+
+98. Si el semáforo es ⚪ y el z global es menor que −3, la tarjeta lo dice: "Sin señal, pero
+    la región es menos irregular que su nulo (z = …): con este campo la prueba pierde
+    sensibilidad y un ⚪ no descarta estructura". El nivel no cambia.

@@ -67,6 +67,16 @@ def test_many_unmasked_compact_objects_cannot_make_green():
     assert evaluate(_card(morphology={"n_point_sources": 34}), masked=few, replicate=REP)["level"] == "robust"
 
 
+def test_none_with_strongly_negative_z_is_not_called_noise():
+    # SKYSURF F125W real: FDR 0/4 con p = 1 y z global = -16 (el nulo tiene mas saltos que el cielo).
+    none = _card(structure_test={"fdr": {"fdr_pass": False, "n_passed": 0, "n_tested": 4}, "z_score": -16.2})
+    g = evaluate(none, masked=MASK_OK, replicate=REP)
+    assert g["level"] == "none" and g["insensitive"] and "no descarta" in g["meaning"]
+    plain = _card(structure_test={"fdr": {"fdr_pass": False, "n_passed": 0, "n_tested": 4}, "z_score": -0.5})
+    g = evaluate(plain, masked=MASK_OK, replicate=REP)
+    assert not g["insensitive"] and g["meaning"] == "Nada que el ruido equivalente no explique."
+
+
 def test_candidate_json_has_no_nan():
     import json
     from candidate_export import dumps_candidate

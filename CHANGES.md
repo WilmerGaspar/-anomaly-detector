@@ -609,3 +609,41 @@ fractal → Hollín, agregados de polvo" y el seguimiento "Extinción + hielos/s
 100. Si el resultado no es candidato (⚪, 🟡, 🟠 o 🔴 por el detector), `followup.action` ya
      no propone seguimiento de material: dice el siguiente paso útil (otra región, otra
      exposición…).
+
+## 🧪 Hipótesis de formación (nuevo módulo `hypotheses.py`)
+
+Con el semáforo en 🟢 o 🟣, una tabla relaciona la morfología medida con mecanismos físicos
+publicados. Para cada mecanismo muestra cinco columnas:
+
+- **estado**: ✅ compatible, ❌ no compatible o ❔ no medible con una sola imagen;
+- **por qué**: la medida que lo decide;
+- **qué predice**;
+- **la pregunta** (la prueba que lo confirmaría o descartaría);
+- **la referencia**.
+
+101. Mecanismos y su regla:
+
+     | Mecanismo | Regla |
+     |---|---|
+     | Turbulencia subsónica | β en 3.3–4.0 |
+     | Turbulencia supersónica | β en 2.0–3.3 e intermitencia por encima del nulo |
+     | Filamentos moleculares | exceso de crestas ≥ 0.006 |
+     | Orden por campo magnético | anisotropía significativa en el FDR |
+     | Burbujas por retroalimentación | β1 ≥ 1 |
+     | Fragmentación periódica | espaciado coherente y no del detector |
+     | Medio jerárquico | lacunaridad ≥ 2 y multifractalidad ≥ 0.05 |
+     | Colapso por autogravedad | siempre ❔ |
+
+     Alternativas que una imagen no puede descartar, siempre ❔: campo de galaxias,
+     superposición en la línea de visión y fuentes no resueltas.
+102. Clasificación:
+     - "Patrón compatible con física conocida" si algún mecanismo encaja; las preguntas
+       deciden entre ellos.
+     - "Pregunta abierta" si ninguno encaja. No significa física nueva: pide confirmar en
+       otro filtro, época o instrumento, y descartar las alternativas.
+103. Contexto obligatorio: el objeto según la cabecera FITS (nuevo `source.target` en el JSON)
+     y el aviso de que las hipótesis de gas y polvo no aplican a un campo de galaxias.
+104. Va en la pestaña "🧪 Hipótesis" (usa el nivel de la tarjeta, incluido 🟣 con
+     referencias) y en el JSON (`hypotheses`). Probado con los JSON reales: el NIRCam F200W
+     🟢 sale compatible con turbulencia supersónica y con orden magnético; los ⚪ y 🔴 no
+     generan tabla.

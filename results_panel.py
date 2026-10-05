@@ -320,6 +320,24 @@ def _tab_novelty():
 
 # ---------------------------------------------------------------- entrada
 
+def _tab_hypotheses(R, gate):
+    from hypotheses import ICON, build
+    # Con el nivel de la tarjeta (incluye 🟣 si hay referencias en Novedad).
+    H = build(R["card"], gate["level"] if gate else None)
+    if not H["active"]:
+        st.info(H["note"])
+        return
+    (st.success if H["classification"] == "known_physics" else st.warning)("**%s.** %s" % (H["title"], H["summary"]))
+    st.info(H["context"])
+    st.dataframe([{"": ICON[r["status"]], "mecanismo": r["mechanism"], "estado": r["status"], "por qué": r["why"],
+                   "qué predice": r["predicts"], "pregunta / prueba necesaria": r["question"], "referencia": r["refs"]}
+                  for r in H["rows"]], hide_index=True, use_container_width=True)
+    st.caption("✅ compatible no significa explicado: varias hipótesis pueden serlo a la vez y solo las preguntas de la "
+               "tabla deciden. ❔ = una sola imagen no basta para medirlo. Las relaciones físicas vienen de las "
+               "referencias citadas; los umbrales son rangos amplios, no un ajuste a este caso. La tabla va en el JSON "
+               "(campo hypotheses).")
+
+
 def render_results(R, crop, name, x0, y0, side, n_null):
     mat, fdr, mc, prov, A, details = R["materials"], R["fdr"], R["mc"], R["prov"], R["analytics"], R["details"]
     gate = _discovery_card(R) if R.get("card") else None
@@ -348,7 +366,7 @@ def render_results(R, crop, name, x0, y0, side, n_null):
         st.warning("Aviso de instrumento: %s" % mat["instrument_warning_reason"])
 
     tabs = st.tabs(["Nulo y FDR", "Espectro", "Escalas", "Mapa local", "Familias", "Descriptores", "Región vs nulo",
-                    "🌻 Fibonacci / φ", "Novedad"])
+                    "🌻 Fibonacci / φ", "Novedad", "🧪 Hipótesis"])
     with tabs[0]:
         _tab_null(R, n_null)
     with tabs[1]:
@@ -367,6 +385,8 @@ def render_results(R, crop, name, x0, y0, side, n_null):
         _tab_golden(R)
     with tabs[8]:
         _tab_novelty()
+    with tabs[9]:
+        _tab_hypotheses(R, gate)
         if gate and gate.get("novelty") and gate["novelty"].get("available"):
             nv = gate["novelty"]
             st.metric("Máximo |z| frente a %d referencias" % nv["n_references"], "%.1f" % (nv["max_abs_z"] or 0))

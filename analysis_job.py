@@ -114,6 +114,9 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
         cand["state"] = new_state
         # Sin candidato no se sugiere seguimiento de material: el paso util es otro.
         cand["followup"]["action"] = materials["followup"] = NEXT_STEP[new_state]
+    cand["source"]["target"] = str(meta_full.get("target_header") or "")
+    from hypotheses import build as build_hypotheses
+    cand["hypotheses"] = build_hypotheses(cand, gate["level"])
     return {"results": results, "mc": mc, "fdr": fdr, "materials": materials, "nos": nos, "prov": prov,
             "json": dumps_candidate(cand), "details": details, "analytics": analytics, "card": cand,
             "masked": masked, "replicate": replicate, "golden": golden}

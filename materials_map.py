@@ -29,6 +29,8 @@ STATE_TEXT = {
                       "artificial pasa el test como si fuera estructura. Repite con una región sin vacíos.",
     "reject": "Rechazado para descubrimiento: procedencia insuficiente.",
     "exploratory_only": "Exploratorio, no ciencia usable.",
+    "instrument_artifact": "Rechazado: el detector deja una huella (picos de la FFT alineados con sus ejes) que el test puede "
+                           "tomar por estructura. Prueba otra exposición, otro detector u otra región.",
     "known_or_weak": "Campo usable, pero ningún descriptor sobrevive al FDR. Estructura típica o test insuficiente. No es candidato.",
     "morph_interesting": "Al menos un descriptor sobrevive al FDR. Interés morfológico. Sin espectro no hay identificación.",
     "needs_spectrum": "La morfología sobrevive al FDR. Siguiente paso: espectro (x1d) de la MISMA región.",

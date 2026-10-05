@@ -7,6 +7,14 @@ hijo para devolver la memoria al sistema: el hijo vuelve a cargar numpy, scipy, 
 from __future__ import annotations
 
 
+NEXT_STEP = {
+    "known_or_weak": "No es candidato: nada que el nulo no explique en esta región.",
+    "explained_by_confounder": "Lo explican fuentes conocidas: prueba otra región con menos estrellas.",
+    "unconfirmed": "Faltan controles: prueba una región con menos fuentes para poder enmascararlas.",
+    "instrument_artifact": "Artefacto del detector: prueba otra exposición, otro detector u otra región.",
+}
+
+
 def run_plugins(image, active, raw=None):
     """`raw`: la region sin estirar; solo la usa `ridges` para separar picos de difraccion."""
     out = {}
@@ -79,8 +87,11 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
     cand["morphology"]["is_candidate"] = gate["level"] in ("robust", "pioneer")
     # El estado y el veredicto siguen al semaforo: antes podian decir "interes morfologico"
     # mientras el semaforo decia "explicado por un confusor" (HST WFPC2 real).
-    new_state = {"none": "known_or_weak", "explained": "explained_by_confounder",
-                 "unconfirmed": "unconfirmed"}.get(gate["level"])
+    # 🔴 por artefacto del detector: antes el estado seguia en "needs_spectrum" y proponia un
+    # analogo de material (NIRCam F187N real: "Hollin, agregados" con el semaforo en 🔴).
+    instrument_fail = any(c["check"] == "Sin artefacto de instrumento" and not c["ok"] for c in gate["checks"])
+    new_state = {"none": "known_or_weak", "explained": "explained_by_confounder", "unconfirmed": "unconfirmed",
+                 "invalid": "instrument_artifact" if instrument_fail else None}.get(gate["level"])
     ps_check = next((c for c in gate["checks"] if c["check"] == "No la explican las fuentes puntuales"), None)
     if gate["level"] in ("robust", "pioneer") and ps_check and ps_check["ok"]:
         # El aviso "el FDR puede deberse a las fuentes puntuales" ya se comprobo y no se cumple.
@@ -101,6 +112,11 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
         for target in (materials, cand["morphology"]):
             target["state"], target["verdict"] = new_state, verdict
         cand["state"] = new_state
+        # Sin candidato no se sugiere seguimiento de material: el paso util es otro.
+        cand["followup"]["action"] = materials["followup"] = NEXT_STEP[new_state]
+    cand["source"]["target"] = str(meta_full.get("target_header") or "")
+    from hypotheses import build as build_hypotheses
+    cand["hypotheses"] = build_hypotheses(cand, gate["level"])
     return {"results": results, "mc": mc, "fdr": fdr, "materials": materials, "nos": nos, "prov": prov,
             "json": dumps_candidate(cand), "details": details, "analytics": analytics, "card": cand,
             "masked": masked, "replicate": replicate, "golden": golden}

@@ -597,3 +597,15 @@ que es afirmar de más: aquí la prueba pierde sensibilidad.
 98. Si el semáforo es ⚪ y el z global es menor que −3, la tarjeta lo dice: "Sin señal, pero
     la región es menos irregular que su nulo (z = …): con este campo la prueba pierde
     sensibilidad y un ⚪ no descarta estructura". El nivel no cambia.
+
+## 🔴 por artefacto del detector, pero el estado proponía un material (NIRCam F187N real)
+
+`jw02739001001_02101_00002_nrcb1_i2d`: el semáforo dio 🔴 (pico de la FFT alineado con los
+ejes del detector). Aun así, el estado seguía en `needs_spectrum`, con la familia "Agregado
+fractal → Hollín, agregados de polvo" y el seguimiento "Extinción + hielos/silicatos".
+
+99. Nuevo estado `instrument_artifact` cuando el 🔴 se debe al detector. Figura en
+    `reject_if` y tiene su texto explicativo.
+100. Si el resultado no es candidato (⚪, 🟡, 🟠 o 🔴 por el detector), `followup.action` ya
+     no propone seguimiento de material: dice el siguiente paso útil (otra región, otra
+     exposición…).

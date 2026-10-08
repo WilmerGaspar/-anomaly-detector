@@ -261,6 +261,9 @@ def _discovery_card(R):
             refs.append(_json.loads(up.getvalue().decode("utf-8")))
         except Exception:
             continue
+    # Y los análisis de esta sesión (bitácora de la guía), sin el actual.
+    from guide import references_from_log
+    refs += references_from_log(st.session_state.get("guide_log"), R.get("key") or ())
     g = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"), references=refs or None)
     colors = {"invalid": "#5a1a1a", "none": "#1a1f1b", "unconfirmed": "#4a3210", "explained": "#3d3a10",
               "robust": "#0f3d1c", "pioneer": "#2e1747"}
@@ -312,7 +315,9 @@ def _tab_golden(R):
 
 def _tab_novelty():
     st.markdown("**Novedad frente a tus análisis anteriores**")
-    st.caption("Sube los JSON de análisis previos (mínimo 5). Para cada descriptor se calcula cuánto se aleja este "
+    n_log = max(0, len(st.session_state.get("guide_log") or []) - 1)
+    st.caption("Referencias: %d análisis de esta sesión (bitácora de la guía) + los JSON que subas." % n_log)
+    st.caption("Sube los JSON de análisis previos (mínimo 5 en total). Para cada descriptor se calcula cuánto se aleja este "
                "análisis de la mediana de tus referencias (z robusto). Con |z| ≥ 5 y una estructura robusta, la alerta "
                "sube a 🟣. Dice 'distinto de lo que ya analizaste', no 'nuevo para la ciencia'.")
     st.file_uploader("JSON de referencia", type=["json"], accept_multiple_files=True, key="ref_jsons")

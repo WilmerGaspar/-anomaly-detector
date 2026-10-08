@@ -647,3 +647,30 @@ publicados. Para cada mecanismo muestra cinco columnas:
      referencias) y en el JSON (`hypotheses`). Probado con los JSON reales: el NIRCam F200W
      🟢 sale compatible con turbulencia supersónica y con orden magnético; los ⚪ y 🔴 no
      generan tabla.
+
+## 🧠 Guía en la barra lateral (gratis, por reglas, sin IA de pago)
+
+El objetivo: menos tiempo frente al PC y saber siempre qué hacer después. No es un modelo
+de lenguaje: son reglas fijas (`guide.py`), así que no tiene coste, funciona sin conexión y
+no puede inventar.
+
+105. **Ventana de chat con el siguiente paso**, según el punto en que esté la app: buscar →
+     elegir observación → elegir archivo → analizar → interpretar. Tras un análisis traduce
+     el semáforo a lenguaje claro y da los procedimientos concretos (mover la región, otra
+     exposición, otro filtro, abrir 🧪 Hipótesis, descargar el JSON…). Solo nombra botones
+     que existen en pantalla (con un archivo propio no ofrece los de MAST).
+106. **▶ Hazlo por mí**: en un clic busca en MAST, revisa hasta 6 observaciones, elige la
+     primera imagen válida que quepa en la nube (i2d/drz/drc primero), la descarga, la
+     analiza con la región por defecto y explica el resultado. Escribe en la guía lo que hizo
+     (incluidas las observaciones que descartó y por qué).
+107. **▶ Otro archivo del mismo objeto**: repite con otra observación y prueba primero los
+     filtros aún no analizados (la confirmación que piden las hipótesis). Reutiliza la
+     búsqueda y no repite observaciones ya usadas.
+108. **▶ Analizar por mí** y **bitácora de la sesión**: los análisis se guardan (sin
+     duplicar la misma región) y la pestaña Novedad los usa como referencia sin subir JSON.
+109. **Glosario**: responde preguntas como "¿qué es β?" solo con textos escritos en
+     `guide.py`; si la pregunta no está, lo dice.
+110. Tests: lógica de la guía (23) y piloto automático de punta a punta en la app real
+     (`streamlit.testing`) con MAST simulado: busca, descarta la observación sin imagen,
+     carga y analiza la buena, la guía interpreta y la bitácora guarda. Desde este entorno
+     no hay acceso a MAST: falta probarlo contra el servidor real.

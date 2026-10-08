@@ -64,6 +64,66 @@ if MODE.startswith("📡"):
     render_radio_page()
     st.stop()
 
+# ---------------------------------------------------------------- 🧠 guía (reglas, gratis)
+
+def _render_guide():
+    """Ventana de chat con el siguiente paso. Lee el estado de la ejecución anterior; las
+    acciones (piloto automático, analizar) solo ponen una marca y se ejecutan más abajo."""
+    import json as _json
+
+    import guide as G
+    ss = st.session_state
+    obj = ss.get("obj_free") if ss.get("obj_pick") == "Otro…" else ss.get("obj_pick")
+    field_ok = bool(ss.get("field_path")) and os.path.exists(ss.get("field_path") or "")
+    R = ss.get("results")
+    card, level = None, None
+    if R and field_ok and R.get("key") and R["key"][0] == ss.get("field_name"):
+        card = _json.loads(R["json"])
+        from discovery import evaluate
+        refs = G.references_from_log(ss.get("guide_log"), R["key"])
+        level = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"),
+                         references=refs or None)["level"]
+    msg = G.next_step({"mode": "image", "source_kind": ss.get("source_kind", "Archivo MAST (STScI)"),
+                       "mission": ss.get("mission", next(iter(CURATED))), "obj": obj or (CURATED[next(iter(CURATED))][0]),
+                       "has_search": bool(ss.get("search")), "has_prods": ss.get("prods") is not None,
+                       "field_loaded": ss.get("field_name") if field_ok else None, "card": card, "level": level})
+    with st.sidebar:
+        st.markdown("### 🧠 Guía")
+        for note in ss.get("guide_note") or []:
+            with st.chat_message("user", avatar="🛰️"):
+                st.markdown(note)
+        with st.chat_message("assistant", avatar="🧠"):
+            st.markdown("**%s**%s" % (msg["title"], " (último análisis)" if card else ""))
+            st.markdown(msg["text"])
+            for i, step in enumerate(msg["steps"], 1):
+                st.markdown("%d. %s" % (i, step))
+        labels = {"auto": "▶ Hazlo por mí (buscar, cargar y analizar)", "auto_analyze": "▶ Analizar por mí",
+                  "other_filter": "▶ Otro archivo del mismo objeto"}
+        for a in msg["actions"]:
+            if st.button(labels[a], type="primary", key="guide_" + a, use_container_width=True):
+                ss["guide_note"] = []
+                if a == "auto_analyze":
+                    ss["auto_analyze"] = True
+                else:
+                    ss["autopilot"] = "other" if a == "other_filter" else "full"
+                st.rerun()
+        log = ss.get("guide_log") or []
+        if log:
+            with st.expander("Bitácora de esta sesión (%d): %s" % (len(log), G.log_summary(log))):
+                for e in log:
+                    st.markdown("%s %s · %s" % (e.get("icon") or "·", e.get("file") or "—", e.get("filter") or "—"))
+                st.caption("La pestaña Novedad usa estos análisis como referencia (mínimo 5).")
+        q = st.text_input("Pregunta al glosario", key="guide_q", placeholder="¿Qué es β?")
+        if q:
+            ans = G.answer(q)
+            with st.chat_message("assistant", avatar="📖"):
+                st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
+        st.caption("La guía sigue reglas fijas: no es una IA y no inventa. Gratis y sin conexión.")
+        st.divider()
+
+
+_render_guide()
+
 # ---------------------------------------------------------------- ajustes avanzados
 with st.sidebar:
     st.markdown("**Ajustes avanzados**")
@@ -424,6 +484,50 @@ def sonify(img, sr=22050, dur=8.0, fmin=220.0, fmax=1760.0, ref=None):
 
 from results_panel import render_results  # noqa: E402
 
+def _autopilot(kind, obj, mission, radius):
+    """Piloto automático: busca, elige la primera observación con una imagen válida, la carga y
+    marca el análisis. kind='other' prueba antes los filtros aún no analizados (confirmación).
+    Lo que hace queda escrito en la guía."""
+    import guide as G
+    from mast_client import download_product, list_fits_products, search_observations_detailed
+    ss = st.session_state
+    notes = []
+    try:
+        res = ss.get("search") if kind == "other" else None
+        if not res or res.get("target") != obj:
+            with st.spinner("🧠 Buscando %s en MAST…" % obj):
+                res = search_observations_detailed(obj, [mission], radius_deg=radius)
+            ss["search"] = res
+            notes.append("Busqué «%s» en %s: %s imágenes." % (obj, mission, res.get("n_images")))
+        done_filters = [e.get("filter") for e in ss.get("guide_log") or []] if kind == "other" else []
+        candidates = G.rows_to_try(res.get("rows"), done_filters, ss.get("guide_obs_used") or [])
+        for r in candidates:
+            with st.spinner("🧠 Revisando %s (%s)…" % (r.get("obs_id"), r.get("filters") or "—")):
+                prods = list_fits_products(r["obsid"])
+            p = G.pick_product(prods)
+            if not p:
+                notes.append("%s: sin imagen válida que quepa en la nube; paso a la siguiente." % r.get("obs_id"))
+                continue
+            with st.spinner("🧠 Descargando %s (%s MB)…" % (p["filename"], p.get("size_mb"))):
+                data = download_product(p["uri"], p["filename"], size_mb=p.get("size_mb"))
+            src = dict(r)
+            src.update({"archive": "MAST", "product": p["filename"], "uri": p["uri"],
+                        "download_url": p["download_url"], "acknowledgement": MAST_ACK})
+            set_field(data, p["filename"], src)
+            ss["prods"], ss["prods_obs"] = prods, r
+            ss["guide_obs_used"] = (ss.get("guide_obs_used") or []) + [r.get("obs_id")]
+            ss["auto_analyze"] = True
+            notes.append("Elegí %s · filtro %s · %s MB. Analizando la región por defecto…"
+                         % (p["filename"], r.get("filters") or "—", p.get("size_mb")))
+            break
+        else:
+            notes.append("Ninguna de las %d observaciones revisadas tenía una imagen válida que quepa en la nube. "
+                         "Prueba otro objeto, otra misión o un radio mayor." % len(candidates))
+    except Exception as exc:
+        notes.append("No pude completarlo: %s" % exc)
+    ss["guide_note"] = notes
+
+
 # ================================================================ 1. FUENTE DE DATOS
 st.markdown("### 1. Fuente de datos")
 source_kind = st.radio("Origen", ["Archivo MAST (STScI)", "Archivo propio", "URL directa"], horizontal=True, key="source_kind")
@@ -436,6 +540,13 @@ if source_kind == "Archivo MAST (STScI)":
     radius = c3.number_input("Radio (grados)", 0.01, 0.5, 0.12, 0.01, key="radius")
     if obj in NOTES:
         st.caption(NOTES[obj])
+    if st.session_state.get("autopilot"):
+        kind = st.session_state.pop("autopilot")      # se consume siempre: nunca queda pendiente
+        if obj:
+            _autopilot(kind, obj, mission, radius)
+        else:
+            st.session_state["guide_note"] = ["Escribe el nombre del objeto y vuelve a pulsar ▶."]
+        st.rerun()
     if st.button("Buscar en MAST", type="primary", disabled=not obj):
         try:
             from mast_client import search_observations_detailed
@@ -693,7 +804,11 @@ if aud and aud[2] == pkey + (x0, y0, side):
 
 # ================================================================ 4. ANALISIS
 st.markdown("### 4. Analizar la región")
-if st.button("Analizar", type="primary"):
+run_now = st.button("Analizar", type="primary")
+if st.session_state.pop("auto_analyze", False):
+    run_now = True
+if run_now:
+    analysed = False
     try:
         from analysis_job import run_analysis
         meta_full = dict(meta)
@@ -708,8 +823,16 @@ if st.button("Analizar", type="primary"):
                                hole_frac=hole_frac, max_empty_fraction=MAX_EMPTY_FRACTION)
         out["key"] = pkey + (x0, y0, side)
         st.session_state["results"] = out
+        import json as _json
+
+        import guide as G
+        st.session_state["guide_log"] = G.add_to_log(st.session_state.get("guide_log"),
+                                                     G.log_entry(_json.loads(out["json"]), out["key"]))
+        analysed = True
     except Exception as exc:
         st.exception(exc)
+    if analysed:
+        st.rerun()                         # la guía (arriba) se actualiza con el resultado
 
 R = st.session_state.get("results")
 if R and R["key"] == pkey + (x0, y0, side):

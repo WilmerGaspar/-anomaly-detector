@@ -857,3 +857,13 @@ muestreado casi al límite y su respuesta (MTF) cae dentro de las escalas donde 
 144. `DESCRIPTORS_VERSION = 4`. Tests: longitudes de onda por filtro, frecuencia de corte y FWHM
      de MIRI F2100W (~6 px), β corregido en las dos medidas, β no medible con una región pequeña en
      F2550W, ángulos en el cielo con WCS girados y análisis de punta a punta con WCS.
+
+## NVIDIA: modelo y opción del ejemplo oficial
+
+145. El modelo por defecto de NVIDIA pasa a `nvidia/nemotron-3.5-lightning-30b-a3b`, el del ejemplo
+     oficial que muestra build.nvidia.com (el anterior venía de una búsqueda web, sin confirmar).
+     Se sigue pudiendo cambiar en Secrets con `NVIDIA_MODEL`.
+146. Con ese modelo se envía `chat_template_kwargs: {enable_thinking: false}`, la misma opción del
+     ejemplo pero apagada. Las respuestas son cortas y se comprueban contra los datos, y así no se
+     gastan los tokens razonando. Si el servicio no la acepta (400), se repite sin ella. No se usa
+     el paquete `openai`: la app ya llama al mismo endpoint (`/v1/chat/completions`) con `requests`.

@@ -21,9 +21,12 @@ import time
 import unicodedata
 
 PROVIDERS = [
+    # Modelo y opción de pensamiento tomados del ejemplo oficial de build.nvidia.com (10-oct-2026).
+    # Sin pensamiento: responde antes y no gasta los tokens razonando (las respuestas son cortas y
+    # se comprueban contra los datos). El razonamiento, si llega, viene aparte en reasoning_content.
     {"id": "nvidia", "name": "NVIDIA", "base_url": "https://integrate.api.nvidia.com/v1",
-     "key": "NVIDIA_API_KEY", "model_key": "NVIDIA_MODEL", "default_model": "nvidia/nemotron-3-super-120b-a12b",
-     "signup": "https://build.nvidia.com"},
+     "key": "NVIDIA_API_KEY", "model_key": "NVIDIA_MODEL", "default_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+     "signup": "https://build.nvidia.com", "extra": {"chat_template_kwargs": {"enable_thinking": False}}},
     {"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1",
      "key": "GROQ_API_KEY", "model_key": "GROQ_MODEL", "default_model": "openai/gpt-oss-120b",
      "signup": "https://console.groq.com", "extra": {"reasoning_effort": "low"}},

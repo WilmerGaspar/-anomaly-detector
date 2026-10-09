@@ -176,3 +176,21 @@ def test_low_reasoning_only_for_default_model_and_retried_without_it():
     sent.clear()
     H.chat(_providers(NVIDIA_API_KEY="k")[0], [], post=post)
     assert len(sent) == 1 and "reasoning_effort" not in sent[0]
+
+
+def test_nvidia_uses_the_official_model_without_thinking():
+    """Ejemplo de build.nvidia.com: nemotron-3.5-lightning-30b-a3b; el pensamiento se apaga con
+    chat_template_kwargs.enable_thinking (si el servicio no lo acepta, se repite sin la opción)."""
+    sent = []
+
+    def post(url, headers, json, timeout):
+        sent.append(json)
+        return _Resp(content="hola")
+
+    nv = _providers(NVIDIA_API_KEY="nvapi-x")[0]
+    assert nv["model"] == "nvidia/nemotron-3.5-lightning-30b-a3b"
+    assert H.chat(nv, [{"role": "user", "content": "x"}], post=post)["ok"]
+    assert sent[0]["model"] == nv["model"] and sent[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    sent.clear()
+    H.chat(_providers(NVIDIA_API_KEY="k", NVIDIA_MODEL="otro/modelo")[0], [], post=post)
+    assert "chat_template_kwargs" not in sent[0]                      # otro modelo: sin opciones extra

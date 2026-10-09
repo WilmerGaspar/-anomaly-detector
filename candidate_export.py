@@ -4,6 +4,12 @@ from datetime import datetime, timezone
 import json
 
 SCHEMA_VERSION = "cosmic-candidate.v0.1"
+# Sube cuando cambia como se mide un descriptor: los JSON de otra version no son comparables
+# en Novedad. 2 (9-oct-2026): conteo de cajas completas en el fractal (D0 era ~0.05-0.08 menor),
+# entropia sobre el rango real, direccion de anisotropia con la formula cerrada, beta de
+# Kolmogorov con anillos centrados (~3 % bajo) y beta del espectro sin el filtro de la reduccion
+# a 256 px (~0.15 alto en regiones grandes).
+DESCRIPTORS_VERSION = 2
 FDR_SCOPE = ["aniso", "flatness", "entropy", "energy_mean"]
 NOT_TESTED = ("renormalization_group", "lyapunov_stability", "fibonacci", "graph_morphology", "persistent_homology", "fractal_base", "kolmogorov_1941")
 
@@ -51,7 +57,8 @@ def build_candidate(filename, plugin_results, materials, provenance, nos, monte_
             "n_point_sources": materials.get("n_point_sources"),
             "point_source_warning": bool(materials.get("point_source_warning")),
         },
-        "analysis": {k: meta.get(k) for k in ("crop", "nan_fraction", "empty_area_fraction", "normalization", "null", "active_descriptors", "hdu")},
+        "analysis": dict({k: meta.get(k) for k in ("crop", "nan_fraction", "empty_area_fraction", "normalization", "null", "active_descriptors", "hdu")},
+                         descriptors_version=DESCRIPTORS_VERSION),
         "nos_morphological": nos_pub,
         "structure_test": {
             "method": mc.get("method"), "p_value": mc.get("p_value"), "z_score": mc.get("z_score"),

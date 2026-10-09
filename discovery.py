@@ -159,13 +159,29 @@ def card_vector(card):
     return {"/".join(p[1:]): _get(card, p) for p in NOVELTY_KEYS}
 
 
+def descriptors_version(card):
+    """Versión de los descriptores de una tarjeta; las anteriores al campo son la 1."""
+    try:
+        return int(((card or {}).get("analysis") or {}).get("descriptors_version") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
 def novelty_vs_references(card, references, min_refs=5):
     """Rareza frente a analisis previos del usuario (tarjetas JSON): z robusto por descriptor
     (mediana / 1.4826 MAD). Solo dice 'distinto de lo que tu ya analizaste', no 'nuevo para
     la ciencia'."""
-    refs = [card_vector(r) for r in references]
+    from candidate_export import DESCRIPTORS_VERSION
+    same = [r for r in references if descriptors_version(r) == DESCRIPTORS_VERSION]
+    refs = [card_vector(r) for r in same]
     x = card_vector(card)
     out = {"n_references": len(refs), "per_descriptor": {}, "max_abs_z": None, "available": len(refs) >= min_refs}
+    if len(same) < len(references):
+        out["n_excluded_old"] = len(references) - len(same)
+        out["excluded_note"] = ("%d JSON de referencia son de una versión anterior de los descriptores (antes del "
+                                "9-oct-2026: D0 fractal, β, entropía y dirección de anisotropía se medían con errores) y "
+                                "no se usan: compararlos daría diferencias falsas. Vuelve a analizar esos archivos."
+                                % out["n_excluded_old"])
     if not out["available"]:
         out["note"] = "Hacen falta al menos %d análisis previos (JSON) como referencia." % min_refs
         return out

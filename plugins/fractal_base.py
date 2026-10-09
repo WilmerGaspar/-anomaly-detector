@@ -43,10 +43,15 @@ class FractalBase:
         
         counts = []
         valid_scales = []
+        grids = set()
         
         for scale in scales:
-            if scale < 2 or scale > max_size:
+            # Al menos 2 cajas completas por lado, y una sola escala por rejilla (150 y 157 px
+            # dan las mismas 4 x 4 cajas en 630 px: el punto contaria dos veces en el ajuste).
+            grid = (h // scale, w // scale)
+            if scale < 2 or min(grid) < 2 or grid in grids:
                 continue
+            grids.add(grid)
             
             count = self._box_count(image, scale)
             if count > 0:
@@ -58,10 +63,11 @@ class FractalBase:
         
         scales = np.array(valid_scales)
         counts = np.array(counts, dtype=float)
+        eps = np.array([self._box_eps(image.shape, s) for s in scales])
         
-        d0 = self._calculate_dimension(scales, counts)
+        d0 = self._calculate_dimension(eps, counts)
         
-        log_scales = [safe_log(float(s)) for s in scales]
+        log_scales = [safe_log(float(s)) for s in eps]
         log_counts = [safe_log(float(c)) for c in counts]
         # Antes d1 = 0.95*d0, d2 = 0.90*d0 y multifractalidad y lacunaridad eran numeros al
         # azar (np.random.uniform): cambiaban en cada ejecucion y movian la familia morfologica.
@@ -82,17 +88,26 @@ class FractalBase:
             'log_counts': log_counts
         }
     
+    # Solo cajas COMPLETAS. Antes el borde sobrante se rellenaba con ceros y esas cajas a
+    # medias contaban como cajas enteras: con cajas grandes habia de mas (630 px y cajas de
+    # 157: 25 en vez de 16) y todas las dimensiones salian sesgadas. Medido con una imagen
+    # uniforme (D0 = D1 = D2 = 2 exactos): D0 1.92 < D1 1.98 < D2 1.99, orden invertido, y
+    # la multifractalidad (D0 - D2) se recortaba a 0. El sesgo cambiaba con el lado de la region.
     @staticmethod
     def _box_sums(a, box):
-        """Suma por cajas box x box (los bordes incompletos se rellenan con ceros)."""
+        """Suma por cajas box x box completas; el borde que no llena una caja se descarta."""
         h, w = a.shape
-        hp, wp = -(-h // box) * box, -(-w // box) * box
-        if (hp, wp) != (h, w):
-            a = np.pad(a, ((0, hp - h), (0, wp - w)))
-        return a.reshape(hp // box, box, wp // box, box).sum(axis=(1, 3))
+        nh, nw = h // box, w // box
+        return a[:nh * box, :nw * box].reshape(nh, box, nw, box).sum(axis=(1, 3))
+    
+    @staticmethod
+    def _box_eps(shape, box):
+        """Tamaño de la caja relativo a la zona que cubren las cajas completas: 1/sqrt(nh*nw).
+        Con el tamaño en pixeles, el recorte distinto en cada escala volvia a sesgar el ajuste."""
+        return 1.0 / np.sqrt((shape[0] // box) * (shape[1] // box))
     
     def _box_count(self, image, box_size):
-        # Mismo resultado que el bucle anterior (cajas con algun pixel > 0.1), vectorizado.
+        """Cajas completas con algun pixel > 0.1."""
         return int(np.count_nonzero(self._box_sums((image > 0.1).astype(np.int32), box_size)))
     
     def _generalized_dimensions(self, image, scales):
@@ -106,12 +121,17 @@ class FractalBase:
             return {'d1': 0.0, 'd2': 0.0, 'delta': 0.0}
         le, s0, s1, s2 = [], [], [], []
         for e in scales:
-            p = self._box_sums(m, int(e)).ravel() / total
+            p = self._box_sums(m, int(e)).ravel()
+            if p.sum() <= 0:
+                continue
+            p = p / p.sum()                      # medida de la zona cubierta por cajas completas
             p = p[p > 0]
-            le.append(np.log(e))
+            le.append(np.log(self._box_eps(m.shape, int(e))))
             s0.append(np.log(len(p)))
             s1.append(float(np.sum(p * np.log(p))))
             s2.append(np.log(np.sum(p ** 2)))
+        if len(le) < 3:
+            return {'d1': 0.0, 'd2': 0.0, 'delta': 0.0}
         le = np.array(le)
         slope = lambda y: float(np.polyfit(le, np.array(y), 1)[0])
         d0m, d1, d2 = -slope(s0), slope(s1), slope(s2)

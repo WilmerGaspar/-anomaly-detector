@@ -162,6 +162,20 @@ def surrogate_preview(image, seed=None, max_side=256):
     return small, iaaft_surrogate(small, np.random.default_rng(seed))
 
 
+def spectrum_fit_full_resolution(image, small_shape, k_min=0.02, k_max=0.25):
+    """beta sin el filtro de la reduccion a 256 px. La reduccion (resize con antialiasing) es un
+    filtro paso bajo: empinaba el espectro y beta salia ~0.15 alto en regiones de mas de 256 px
+    (medido con campos sinteticos de beta conocido: 3.87 para 3.67, 2.68 para 2.5). Se ajusta
+    el espectro a resolucion completa en las MISMAS escalas fisicas que antes (k_min-k_max en
+    ciclos por pixel reducido) y se devuelve en las unidades de la grafica (pixel reducido)."""
+    side, small_side = min(image.shape), min(small_shape)
+    f = small_side / float(side)                  # ciclos/pixel reducido -> ciclos/pixel completo
+    kf, pf = radial_power_spectrum(image)
+    fit = fit_power_law(kf, pf, k_min=k_min * f, k_max=k_max * f)
+    fit.update(k_min=k_min, k_max=k_max, resolution="completa (%d px)" % side)
+    return fit
+
+
 def full_analytics(image, seed=None, valid=None):
     """Todo el paquete analitico en un dict serializable a JSON."""
     small = downsample_for_null(image, max_side=256)
@@ -169,8 +183,16 @@ def full_analytics(image, seed=None, valid=None):
     surr = iaaft_surrogate(small, np.random.default_rng(seed))
     _, pn = radial_power_spectrum(small, window=False)
     _, ps = radial_power_spectrum(surr, window=False)
+    if small.shape == np.shape(image):
+        fit = fit_power_law(k, p)
+    else:
+        fit = spectrum_fit_full_resolution(image, small.shape)
+        # Recta de la grafica: misma pendiente, ordenada ajustada a la curva reducida.
+        sel = (k >= fit["k_min"]) & (k <= fit["k_max"]) & (p > 0)
+        if np.isfinite(fit["beta"]) and sel.any():
+            fit["intercept"] = float(np.mean(np.log10(p[sel]) + fit["beta"] * np.log10(k[sel])))
     return {"spectrum": {"k": k.tolist(), "p": p.tolist(), "p_nowindow": pn.tolist(), "p_surrogate": ps.tolist(),
-                         "fit": fit_power_law(k, p)},
+                         "fit": fit},
             "scales": scale_profile(image, seed=seed),
             "increments": increment_histograms(image, seed=seed),
             "local_map": local_significance_map(image, seed=seed, valid=valid)}

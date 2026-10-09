@@ -11,16 +11,19 @@ def calculate_entropy(image, bins=256):
     
     data = image.flatten().astype(float)
     
-    # Normalizar a 0-255 si no lo está
-    if data.max() > 255 or data.min() < 0:
-        data = (data - data.min()) / (data.max() - data.min()) * 255
-    
-    # Histograma
-    hist, bin_edges = np.histogram(data, bins=bins, range=(0, 255), density=True)
-    hist = hist[hist > 0]  # Eliminar bins vacíos
-    
-    # Entropía de Shannon (bits)
-    shannon_entropy = scipy_entropy(hist, base=2)
+    # Histograma sobre el rango real de los datos. Antes era siempre 0-255, pero la app
+    # pasa la region estirada a [0, 1]: todos los pixeles caian en los 2 primeros de 256
+    # intervalos y la entropia salia ~0.14 bits en cualquier imagen (los 14 JSON reales
+    # recibidos: 0.108-0.145), que ademas subia las familias "compact" y "lattice".
+    finite = data[np.isfinite(data)]
+    lo, hi = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 0.0)
+    if hi > lo:
+        hist, bin_edges = np.histogram(finite, bins=bins, range=(lo, hi))
+        hist = hist[hist > 0]  # Eliminar bins vacíos
+        # Entropía de Shannon (bits)
+        shannon_entropy = float(scipy_entropy(hist, base=2))
+    else:
+        shannon_entropy = 0.0                     # imagen constante: un solo valor
     
     # Entropía máxima (uniforme)
     max_entropy = np.log2(bins)

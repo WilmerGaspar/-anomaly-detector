@@ -5,6 +5,7 @@ import pytest
 
 import radio_signals as rs
 from discovery import evaluate, fdr_without_point_sources, mask_point_sources, novelty_vs_references
+from candidate_export import DESCRIPTORS_VERSION
 from golden import GOLDEN_ANGLE, PHI, golden_angle_test, phi_scale_test
 
 
@@ -37,7 +38,7 @@ def test_point_sources_masked_removes_signal():
 
 def _card(**over):
     card = {"source": {"provenance": {"verdict": "usable_science"}},
-            "analysis": {"empty_area_fraction": 0.0},
+            "analysis": {"empty_area_fraction": 0.0, "descriptors_version": DESCRIPTORS_VERSION},
             "morphology": {"instrument_warning": False, "n_point_sources": 0},
             "structure_test": {"fdr": {"fdr_pass": True, "n_passed": 3, "n_tested": 4}},
             "descriptors": {"ridges": {"filament_excess": 0.0, "n_spike_components": 0}}}
@@ -105,6 +106,22 @@ def test_novelty_needs_references_and_flags_outlier():
     nv = novelty_vs_references(odd, refs)
     assert nv["available"] and nv["max_abs_z"] > 5
     assert evaluate(odd, masked=MASK_OK, replicate=REP, references=refs)["level"] == "pioneer"
+
+
+def test_novelty_ignores_references_measured_with_old_descriptors():
+    """JSON anteriores al 9-oct-2026 (D0 sesgado ~0.05-0.08): no se mezclan con los nuevos."""
+    new = [_card(descriptors={"fractal_base": {"d0": 1.90 + 0.002 * i}}) for i in range(5)]
+    old = []
+    for i in range(6):
+        c = _card(descriptors={"fractal_base": {"d0": 1.83 + 0.002 * i}})
+        c["analysis"].pop("descriptors_version")                 # JSON antiguo: sin el campo
+        old.append(c)
+    cur = _card(descriptors={"fractal_base": {"d0": 1.905}})
+    mixed = novelty_vs_references(cur, old + new)
+    assert mixed["n_references"] == 5 and mixed["n_excluded_old"] == 6 and "Vuelve a analizar" in mixed["excluded_note"]
+    assert mixed["max_abs_z"] < 1                                 # frente a los nuevos no es raro
+    only_old = novelty_vs_references(cur, old)
+    assert not only_old["available"] and only_old["n_excluded_old"] == 6
 
 
 def _one_star(n, cy, cx, amp=400, spike_amp=40, length=120, sig=2.5):

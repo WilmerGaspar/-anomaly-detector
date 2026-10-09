@@ -706,3 +706,43 @@ las medidas y las hipótesis los sigue calculando la app.
      el consejo, la clave que nunca aparece en pantalla y la propuesta aceptada que busca,
      carga y analiza. Desde este entorno no hay acceso a los servidores de las IA: falta
      probar con claves reales.
+
+## Errores de medida encontrados con el JSON de NGC 7023 (MIRI F2100W)
+
+Revisando la región x384 y378 s630 del filamento NW de NGC 7023 aparecieron valores
+imposibles. Comparados con los 14 JSON reales recibidos, eran errores de cálculo en
+todas las imágenes, no algo de este objeto. **El semáforo no cambia**: usa las pruebas
+frente al nulo, no estos descriptores. Sí cambian la familia morfológica, la tabla de
+🧪 Hipótesis (β) y la pestaña Novedad.
+
+116. **Dimensiones fractales**: las cajas incompletas del borde contaban como cajas
+     enteras. Con una imagen uniforme (D0 = D1 = D2 = 2 exactos) salía D0 1.92 < D1 1.98 <
+     D2 1.99 (orden imposible) y la multifractalidad se recortaba a 0, como en este JSON
+     (D0 1.83 < D1 1.94). Ahora solo se usan cajas completas, con su tamaño relativo:
+     2.000 exacto a cualquier tamaño. Con una cascada de dimensiones conocidas, D1 1.84 y D2
+     1.73 (teoría 1.846 y 1.737); la multifractalidad pasa de 0.19 a 0.27 (teoría 0.263).
+117. **Entropía**: el histograma iba de 0 a 255, pero la región llega estirada a [0, 1].
+     Todos los píxeles caían en 2 de 256 intervalos: 0.11-0.15 bits en los 14 JSON. Eso
+     subía siempre las familias "compact" y "lattice". Ahora el histograma usa el rango
+     real (uniforme → 1.0 normalizada; dos valores → 1 bit exacto).
+118. **Dirección de anisotropía**: siempre salía `null` en Streamlit Cloud. Además se
+     ordenaban los autovalores pero no los autovectores, así que la dirección a veces era
+     la del eje menor (franjas a 60° → −30°; a 90° → 0°). Ahora se usa la fórmula cerrada
+     del tensor 2×2, sin `eig`: 0°, 30°, 60°, 90° y 135° salen bien. El índice no cambia.
+119. **Error de β (`beta_se`)**: el resultado de `linregress` se desempaquetaba en otro
+     orden y el "error" era el valor p del ajuste: `null` en 13 de 14 JSON y un valor p en el
+     otro. Ahora es el error de la pendiente (≈ 0.02-0.04).
+120. **β de Kolmogorov**: el radio se truncaba antes de formar los anillos, que quedaban
+     desplazados medio píxel, y β salía ~3 % bajo (3.57 para 3.67). Ahora los anillos están
+     centrados: media de 6 campos 3.663 para 3.67 y 2.506 para 2.5.
+121. **β del espectro** (el de la gráfica y las hipótesis): en regiones de más de 256 px se
+     ajustaba sobre la imagen reducida, cuyo filtro antialiasing empinaba el espectro (3.87
+     para 3.67; 2.68 para 2.5). Ahora se ajusta a resolución completa en las mismas escalas
+     físicas: 3.65-3.72 para 3.67 y 2.45-2.49 para 2.5.
+122. **Novedad**: al añadir la pestaña 🧪 Hipótesis, la tabla de z de Novedad quedó dentro
+     de esa pestaña. Vuelve a Novedad. Cada JSON lleva ahora `analysis.descriptors_version`
+     (2). Novedad no usa JSON de referencia de otra versión (compararlos daría diferencias
+     falsas en D0 y β) y dice cuántos dejó fuera.
+123. Tests: dimensión 2 exacta en imágenes uniformes (cuadradas y rectangulares), cascada
+     con teoría, entropía, dirección con franjas, β sin sesgo con su error, β sin el filtro
+     de la reducción y referencias de versión antigua excluidas.

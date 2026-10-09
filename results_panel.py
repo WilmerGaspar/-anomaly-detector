@@ -390,8 +390,8 @@ def render_results(R, crop, name, x0, y0, side, n_null):
         _tab_golden(R)
     with tabs[8]:
         _tab_novelty()
-    with tabs[9]:
-        _tab_hypotheses(R, gate)
+        # Antes este bloque quedo dentro de la pestaña Hipótesis (al añadirla): la tabla de z
+        # no se veia en Novedad.
         if gate and gate.get("novelty") and gate["novelty"].get("available"):
             nv = gate["novelty"]
             st.metric("Máximo |z| frente a %d referencias" % nv["n_references"], "%.1f" % (nv["max_abs_z"] or 0))
@@ -399,6 +399,10 @@ def render_results(R, crop, name, x0, y0, side, n_null):
                           for k, v in nv["per_descriptor"].items()], hide_index=True, use_container_width=True)
         elif gate and gate.get("novelty"):
             st.caption(gate["novelty"].get("note", ""))
+        if gate and (gate.get("novelty") or {}).get("n_excluded_old"):
+            st.warning(gate["novelty"]["excluded_note"])
+    with tabs[9]:
+        _tab_hypotheses(R, gate)
 
     stem = "cms80_%s_x%d_y%d_s%d" % (str(name).split(".")[0], x0, y0, side)
     d1, d2, d3 = st.columns(3)

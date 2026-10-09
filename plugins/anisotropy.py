@@ -18,33 +18,21 @@ def calculate_anisotropy(image):
     Ixy = ndimage.gaussian_filter(gx*gy, sigma=sigma)
     Iyy = ndimage.gaussian_filter(gy**2, sigma=sigma)
     
-    # Calcular anisotropía local
-    anisotropies = []
-    directions = []
-    
-    step = max(1, min(image.shape) // 50)  # Muestreo adaptativo
-    
-    for i in range(0, image.shape[0], step):
-        for j in range(0, image.shape[1], step):
-            M = np.array([[Ixx[i,j], Ixy[i,j]], 
-                         [Ixy[i,j], Iyy[i,j]]])
-            
-            if not np.isnan(M).any() and not np.isinf(M).any():
-                try:
-                    w, v = np.linalg.eig(M)
-                    w = np.sort(w)[::-1]  # Mayor primero
-                    
-                    if w[0] + w[1] > 1e-10:
-                        aniso = (w[0] - w[1]) / (w[0] + w[1])
-                        anisotropies.append(aniso)
-                        
-                        # Dirección del autovector mayor
-                        angle = np.arctan2(v[1,0], v[0,0])
-                        directions.append(angle)
-                except Exception:
-                    continue
-    
-    if len(anisotropies) == 0:
+    # Anisotropia local del tensor de estructura 2x2 [[Ixx, Ixy], [Ixy, Iyy]] con la formula
+    # cerrada (exacta para matrices simetricas 2x2):
+    #   (l1 - l2) / (l1 + l2) = sqrt((Ixx - Iyy)^2 + 4 Ixy^2) / (Ixx + Iyy)
+    #   angulo del autovector mayor = 0.5 * atan2(2 Ixy, Ixx - Iyy)
+    # Antes se usaba np.linalg.eig punto a punto: ordenaba los autovalores pero no los
+    # autovectores (la direccion salia a veces del eje menor) y, en Streamlit Cloud, la
+    # direccion dominante salia vacia (null) en los 14 JSON reales recibidos.
+    step = max(1, min(image.shape) // 50)  # Muestreo adaptativo (mismos puntos que antes)
+    sxx, sxy, syy = Ixx[::step, ::step], Ixy[::step, ::step], Iyy[::step, ::step]
+    trace = sxx + syy
+    ok = np.isfinite(sxx) & np.isfinite(sxy) & np.isfinite(syy) & (trace > 1e-10)
+    anisotropies = (np.sqrt((sxx - syy) ** 2 + 4.0 * sxy ** 2)[ok] / trace[ok]).clip(0.0, 1.0)
+    directions = 0.5 * np.arctan2(2.0 * sxy[ok], (sxx - syy)[ok])
+
+    if anisotropies.size == 0:
         return {
             "anisotropy_index": 0.0,
             "dominant_direction_degrees": None,
@@ -54,22 +42,15 @@ def calculate_anisotropy(image):
             "complexity_score": 0.0
         }
     
-    anisotropies = np.array(anisotropies)
-    directions = np.array(directions)
-    
     # Índice global de anisotropía
     mean_anisotropy = np.mean(anisotropies)
     
-    # Dirección dominante (circular, usar estadística circular)
-    if len(directions) > 0:
-        sin_mean = np.mean(np.sin(2*directions))
-        cos_mean = np.mean(np.cos(2*directions))
-        dominant_angle = 0.5 * np.arctan2(sin_mean, cos_mean)
-        # corregir cálculo de varianza circular
-        direction_variance = 1 - np.sqrt(sin_mean**2 + cos_mean**2)
-    else:
-        dominant_angle = None
-        direction_variance = None
+    # Dirección dominante del gradiente (perpendicular a las estructuras alargadas), en
+    # grados desde el eje x de la imagen; estadística circular de ejes (ángulo doble).
+    sin_mean = np.mean(np.sin(2*directions))
+    cos_mean = np.mean(np.cos(2*directions))
+    dominant_angle = 0.5 * np.arctan2(sin_mean, cos_mean)
+    direction_variance = 1 - np.sqrt(sin_mean**2 + cos_mean**2)
     
     # Interpretación
     if mean_anisotropy < 0.1:

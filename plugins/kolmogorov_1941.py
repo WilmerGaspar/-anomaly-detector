@@ -55,13 +55,18 @@ def fit_beta_with_error(k, Pr, n_bins=12):
             continue
         xs.append(float(log_k[sel].mean()))
         ys.append(float(log_P[sel].mean()))
+    # linregress devuelve (pendiente, ordenada, r, p, error): antes se desempaquetaba como
+    # (pendiente, ordenada, r, error, p) y "beta_se" era el valor p del ajuste. Casi siempre
+    # salia < 1e-4 y se convertia en NaN (null en 13 de 14 JSON reales); en el otro era el p.
     if len(xs) < 5:
-        slope, _a, r, se, _p = stats.linregress(log_k, log_P)
+        fit = stats.linregress(log_k, log_P)
+        slope, r, se = fit.slope, fit.rvalue, fit.stderr
         beta_se = float(se)
         if not np.isfinite(beta_se) or beta_se < 1e-4:
             beta_se = float("nan")
         return {"beta": float(-slope), "beta_se": beta_se, "r_squared": float(r ** 2), "k_range": [float(k[mask].min()), float(k[mask].max())], "n_k_bins": int(mask.sum())}
-    slope, _a, r, se, _p = stats.linregress(xs, ys)
+    fit = stats.linregress(xs, ys)
+    slope, r, se = fit.slope, fit.rvalue, fit.stderr
     beta_se = float(se)
     if not np.isfinite(beta_se) or beta_se < 1e-4:
         beta_se = float("nan")
@@ -115,7 +120,9 @@ class Kolmogorov1941:
         h, w = power_spectrum.shape
         cy, cx = h // 2, w // 2
         y, x = np.ogrid[:h, :w]
-        r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2).astype(int)
+        # Anillos centrados en cada radio (|r - radio| < 0.5). Antes r se truncaba a entero y el
+        # anillo "radio" cubria [radio, radio+1): k medio radio+0.5 asignado a radio, beta ~3 % bajo.
+        r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
         r_max = min(cy, cx)
         k_values, spectrum_values = [], []
         for radius in range(1, min(r_max, self.num_shells * 5)):

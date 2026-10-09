@@ -351,6 +351,10 @@ def parse_field(path, name, hdu_index=None):
                     "target_header": hk("TARGNAME", "TARGPROP", "OBJECT"), "date_obs": hk("DATE-OBS", "DATE-BEG"),
                     "program": hk("PROGRAM", "PROPOSID"), "bunit": hk("BUNIT"),
                     "exp_type": hk("EXP_TYPE")}
+            # Escala de pixel (para corregir beta por la difraccion) y WCS celeste (centro de la
+            # region y direccion de las estructuras en el cielo). Ver psf.py.
+            from psf import wcs_info
+            meta.update(wcs_info(h1))
     else:
         from PIL import Image
         with Image.open(path) as im:

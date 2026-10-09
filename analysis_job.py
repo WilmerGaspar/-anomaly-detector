@@ -15,8 +15,9 @@ NEXT_STEP = {
 }
 
 
-def run_plugins(image, active, raw=None):
-    """`raw`: la region sin estirar; solo la usa `ridges` para separar picos de difraccion."""
+def run_plugins(image, active, raw=None, nu_c=None):
+    """`raw`: la region sin estirar; solo la usa `ridges` para separar picos de difraccion.
+    `nu_c`: corte de la difraccion (ciclos/pixel, psf.py); Kolmogorov corrige beta con el."""
     out = {}
     class_steps = [("fractal_base", "plugins.fractal_base", "FractalBase"), ("kolmogorov_1941", "plugins.kolmogorov_1941", "Kolmogorov1941"),
                    ("lyapunov_stability", "plugins.lyapunov_stability", "LyapunovStability"), ("persistent_homology", "plugins.persistent_homology", "PersistentHomology"),
@@ -29,7 +30,8 @@ def run_plugins(image, active, raw=None):
         if key in active:
             try:
                 m = __import__(mod, fromlist=[cls])
-                out[key] = getattr(m, cls)().analyze(image)
+                obj = getattr(m, cls)(nu_c=nu_c) if key == "kolmogorov_1941" else getattr(m, cls)()
+                out[key] = obj.analyze(image)
             except Exception as exc:
                 out[key] = {"error": str(exc)}
     for key, mod, fn in fn_steps:
@@ -56,11 +58,14 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
 
     src = source.get("download_url") or source.get("uri") or source.get("archive", "")
     prov = assess_provenance(str(name), meta_full, src)
-    results = run_plugins(crop, active, raw=crop_raw)
+    import psf as PSF
+    psf_info = PSF.describe(meta_full)
+    nu_c = psf_info["nu_c_cycles_per_px"]
+    results = run_plugins(crop, active, raw=crop_raw, nu_c=nu_c)
     mc = surrogate_null_test(crop, None, cheap_score_from_image, n_simulations=n_null, seed=seed)
     details = cheap_descriptor_null_details(crop, n_simulations=n_null, seed=seed + 1)
     fdr = fdr_decision({k: d["p"] for k, d in details.items()}, n_simulations=n_null)
-    analytics = full_analytics(crop, seed=seed + 2, valid=valid)
+    analytics = full_analytics(crop, seed=seed + 2, valid=valid, nu_c=nu_c)
     mc["fdr"] = fdr
     mc["descriptor_nulls"] = {k: {kk: vv for kk, vv in d.items() if kk != "null"} for k, d in details.items()}
     materials = interpret(results, float(mc.get("z_score") or 0), float(mc.get("p_value") or 1),
@@ -115,6 +120,18 @@ def run_analysis(crop, crop_raw, valid, active, n_null, seed, name, meta_full, s
         # Sin candidato no se sugiere seguimiento de material: el paso util es otro.
         cand["followup"]["action"] = materials["followup"] = NEXT_STEP[new_state]
     cand["source"]["target"] = str(meta_full.get("target_header") or "")
+    # Difraccion usada para corregir beta y geometria en el cielo (centro y direccion de las
+    # estructuras como angulo de posicion): los angulos en pixeles no se comparan entre
+    # observaciones, que pueden estar giradas (MIRI F2100W 17° frente a F1000W -20° en NGC 7023).
+    cand["analysis"]["psf"] = psf_info
+    crop_box = meta_full.get("crop") or {}
+    aniso = cand["descriptors"].get("anisotropy") or {}
+    geo = PSF.sky_geometry(meta_full.get("wcs"), crop_box.get("x0", 0), crop_box.get("y0", 0),
+                           crop_box.get("side", min(np.shape(crop))), [aniso.get("structure_direction_degrees")])
+    if geo:
+        cand["source"]["center_ra_deg"], cand["source"]["center_dec_deg"] = geo["center_ra_deg"], geo["center_dec_deg"]
+        if aniso and geo["pa_deg"] and geo["pa_deg"][0] is not None:
+            aniso["structure_pa_deg"] = geo["pa_deg"][0]
     from hypotheses import build as build_hypotheses
     cand["hypotheses"] = build_hypotheses(cand, gate["level"])
     return {"results": results, "mc": mc, "fdr": fdr, "materials": materials, "nos": nos, "prov": prov,

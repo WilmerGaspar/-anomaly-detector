@@ -11,7 +11,9 @@ SCHEMA_VERSION = "cosmic-candidate.v0.1"
 # a 256 px (~0.15 alto en regiones grandes).
 # 3 (9-oct-2026, tarde): beta de Kolmogorov con ventana (sin ella los bordes lo arrastraban hacia
 # 3: 2.45 frente a 1.66 en un MIRI F1000W real) y prueba de direccion preferente.
-DESCRIPTORS_VERSION = 3
+# 4 (10-oct-2026): beta corregido por la difraccion del telescopio (psf.py): sin corregir, MIRI
+# F2100W subia 2.5 -> 3.6 y NIRCam F200W 2.5 -> 2.8.
+DESCRIPTORS_VERSION = 4
 FDR_SCOPE = ["aniso", "flatness", "entropy", "energy_mean"]
 NOT_TESTED = ("renormalization_group", "lyapunov_stability", "fibonacci", "graph_morphology", "persistent_homology", "fractal_base", "kolmogorov_1941")
 
@@ -59,7 +61,8 @@ def build_candidate(filename, plugin_results, materials, provenance, nos, monte_
             "n_point_sources": materials.get("n_point_sources"),
             "point_source_warning": bool(materials.get("point_source_warning")),
         },
-        "analysis": dict({k: meta.get(k) for k in ("crop", "nan_fraction", "empty_area_fraction", "normalization", "null", "active_descriptors", "hdu")},
+        "analysis": dict({k: meta.get(k) for k in ("crop", "nan_fraction", "empty_area_fraction", "normalization", "null", "active_descriptors", "hdu",
+                                                   "pixel_scale_arcsec")},
                          descriptors_version=DESCRIPTORS_VERSION),
         "nos_morphological": nos_pub,
         "structure_test": {
@@ -76,12 +79,13 @@ def build_candidate(filename, plugin_results, materials, provenance, nos, monte_
 def _thin_descriptors(plugin_results):
     keep = {
         "fractal_base": ("d0", "d1", "d2", "lacunarity", "multifractality_index", "p"),
-        "kolmogorov_1941": ("beta", "beta_se", "r_squared", "k_range", "n_k_bins", "k62_kurtosis", "intermittency_factor", "intermittency_clipped", "isotropic_score", "p"),
+        "kolmogorov_1941": ("beta", "beta_se", "beta_raw", "psf_corrected", "r_squared", "k_range", "n_k_bins", "k62_kurtosis",
+                            "intermittency_factor", "intermittency_clipped", "isotropic_score", "p"),
         "periodicity": ("periodicity_score", "n_significant_peaks", "lattice_hint", "likely_instrument_artifact", "axis_aligned_fraction",
                         "peak_threshold", "n_streaks", "streak_angles_deg", "lattice_consistent", "note", "p"),
         "ridges": ("filament_fraction", "filament_fraction_null", "filament_excess", "n_compact_sources", "n_spike_components",
                    "spike_fraction", "threshold", "min_length_px", "n_surrogates", "note"),
-        "anisotropy": ("anisotropy_index", "dominant_direction_degrees", "structure_direction_degrees",
+        "anisotropy": ("anisotropy_index", "dominant_direction_degrees", "structure_direction_degrees", "structure_pa_deg",
                        "orientation_coherence", "orientation_null_mean", "orientation_null_q95", "orientation_p", "p"),
         "persistent_homology": ("betti_0", "betti_1", "euler_characteristic", "p"),
         "renormalization_group": ("correlation_length", "correlation_length_clipped", "correlation_length_max_lag", "scale_invariance_score", "p", "note"),

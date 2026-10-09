@@ -41,7 +41,7 @@ def _fake_ai(monkeypatch):
 
 
 def _texts(at):
-    out = [m.value for m in at.sidebar.markdown] + [c.value for c in at.sidebar.caption]
+    out = [m.value for m in at.main.markdown] + [c.value for c in at.main.caption]
     return " ".join(str(t) for t in out)
 
 
@@ -55,7 +55,7 @@ def test_without_keys_everything_is_white_and_nothing_is_sent(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at)
     assert "⚪ NVIDIA · ⚪ Groq · ⚪ OpenRouter · ⚪ Gemini" in text
-    assert not [b for b in at.sidebar.button if b.key == "ai_ask"] and calls == []
+    assert not [b for b in at.main.button if b.key == "ai_ask"] and calls == []
 
 
 def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: F811
@@ -75,7 +75,7 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     at.run()
     assert len(calls) == 3                                       # no se vuelve a probar en cada recarga
 
-    next(b for b in at.sidebar.button if b.key == "ai_ask").click().run()
+    next(b for b in at.main.button if b.key == "ai_ask").click().run()
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at)
     assert "✅ pasa la comprobación" in text and "Primero hay que buscar" in text
@@ -83,7 +83,7 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     assert "🔴 OpenRouter: clave no válida" in text
     assert "SECRETO" not in text + " ".join(str(m.value) for m in at.markdown)   # la clave nunca se ve
     # Solo cuenta la respuesta que pasa la comprobación: 1 de 2.
-    do = [b for b in at.sidebar.button if b.key == "ai_do"]
+    do = [b for b in at.main.button if b.key == "ai_do"]
     assert do and "(1 de 2 IA)" in do[0].label and "Hazlo por mí" in do[0].label
 
     do[0].click().run()
@@ -94,10 +94,10 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     assert not at.exception, [e.value for e in at.exception]
     assert fake_mast["download"] == ["mast:ok"] and len(at.session_state["guide_log"]) == 1
     # Tras el análisis las respuestas son de un paso anterior: no se ofrece repetir la acción.
-    assert "paso anterior" in _texts(at) and not [b for b in at.sidebar.button if b.key == "ai_do"]
+    assert "paso anterior" in _texts(at) and not [b for b in at.main.button if b.key == "ai_do"]
 
     # Con un resultado, el resumen que reciben las IA lleva las medidas reales del JSON.
-    next(b for b in at.sidebar.button if b.key == "ai_ask").click().run()
+    next(b for b in at.main.button if b.key == "ai_ask").click().run()
     ctx = json.loads(calls[-1]["json"]["messages"][1]["content"].split("DATOS:\n", 1)[1].split("\n\nPREGUNTA:")[0])
     a = ctx["ANALISIS"]
     assert a["archivo"] == "jw_prueba_i2d.fits" and a["filtro"] == "F200W" and a["semaforo"]["nivel"]

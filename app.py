@@ -88,33 +88,36 @@ def _render_guide():
                        "mission": ss.get("mission", next(iter(CURATED))), "obj": obj or (CURATED[next(iter(CURATED))][0]),
                        "has_search": bool(ss.get("search")), "has_prods": ss.get("prods") is not None,
                        "field_loaded": ss.get("field_name") if field_ok else None, "card": card, "level": level})
-    with st.sidebar:
+    # En la pantalla principal, arriba (antes estaba en la barra lateral, poco visible).
+    with st.container(border=True):
         st.markdown("### 🧠 Guía")
-        for note in ss.get("guide_note") or []:
-            with st.chat_message("user", avatar="🛰️"):
-                st.markdown(note)
-        with st.chat_message("assistant", avatar="🧠"):
-            st.markdown("**%s**%s" % (msg["title"], " (último análisis)" if card else ""))
-            st.markdown(msg["text"])
-            for i, step in enumerate(msg["steps"], 1):
-                st.markdown("%d. %s" % (i, step))
-        for a in msg["actions"]:
-            if st.button(AI.ACTION_LABELS[a], type="primary", key="guide_" + a, use_container_width=True):
-                _guide_action(a)
-        log = ss.get("guide_log") or []
-        if log:
-            with st.expander("Bitácora de esta sesión (%d): %s" % (len(log), G.log_summary(log))):
-                for e in log:
-                    st.markdown("%s %s · %s" % (e.get("icon") or "·", e.get("file") or "—", e.get("filter") or "—"))
-                st.caption("La pestaña Novedad usa estos análisis como referencia (mínimo 5).")
-        q = st.text_input("Pregunta (glosario e IA conectadas)", key="guide_q", placeholder="¿Qué es β?")
-        if q:
-            ans = G.answer(q)
-            with st.chat_message("assistant", avatar="📖"):
-                st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
-        st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
-        AI.render(q, card, msg, log, gate, _guide_action)
-        st.divider()
+        left, right = st.columns([3, 2], gap="medium")
+        with left:
+            for note in ss.get("guide_note") or []:
+                with st.chat_message("user", avatar="🛰️"):
+                    st.markdown(note)
+            with st.chat_message("assistant", avatar="🧠"):
+                st.markdown("**%s**%s" % (msg["title"], " (último análisis)" if card else ""))
+                st.markdown(msg["text"])
+                for i, step in enumerate(msg["steps"], 1):
+                    st.markdown("%d. %s" % (i, step))
+            for a in msg["actions"]:
+                if st.button(AI.ACTION_LABELS[a], type="primary", key="guide_" + a, use_container_width=True):
+                    _guide_action(a)
+            log = ss.get("guide_log") or []
+            if log:
+                with st.expander("Bitácora de esta sesión (%d): %s" % (len(log), G.log_summary(log))):
+                    for e in log:
+                        st.markdown("%s %s · %s" % (e.get("icon") or "·", e.get("file") or "—", e.get("filter") or "—"))
+                    st.caption("La pestaña Novedad usa estos análisis como referencia (mínimo 5).")
+        with right:
+            q = st.text_input("Pregunta (glosario e IA conectadas)", key="guide_q", placeholder="¿Qué es β?")
+            if q:
+                ans = G.answer(q)
+                with st.chat_message("assistant", avatar="📖"):
+                    st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
+            st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
+            AI.render(q, card, msg, log, gate, _guide_action)
 
 
 def _guide_action(a):
@@ -495,7 +498,7 @@ def _autopilot(kind, obj, mission, radius):
     marca el análisis. kind='other' prueba antes los filtros aún no analizados (confirmación).
     Lo que hace queda escrito en la guía."""
     import guide as G
-    from mast_client import download_product, list_fits_products, search_observations_detailed
+    from mast_client import ExclusiveAccessError, download_product, list_fits_products, search_observations_detailed
     ss = st.session_state
     notes = []
     try:
@@ -505,6 +508,12 @@ def _autopilot(kind, obj, mission, radius):
                 res = search_observations_detailed(obj, [mission], radius_deg=radius)
             ss["search"] = res
             notes.append("Busqué «%s» en %s: %s imágenes." % (obj, mission, res.get("n_images")))
+        locked = [r for r in res.get("rows") or [] if r.get("is_public") is False]
+        if locked:
+            notes.append("Salté %d %s 🔒 en periodo de acceso exclusivo: solo su equipo puede descargarlas hasta "
+                         "su fecha de publicación (la primera, %s)."
+                         % (len(locked), "observación" if len(locked) == 1 else "observaciones",
+                            min((r.get("release_date") or "—") for r in locked)))
         done_filters = [e.get("filter") for e in ss.get("guide_log") or []] if kind == "other" else []
         candidates = G.rows_to_try(res.get("rows"), done_filters, ss.get("guide_obs_used") or [])
         for r in candidates:
@@ -512,10 +521,19 @@ def _autopilot(kind, obj, mission, radius):
                 prods = list_fits_products(r["obsid"])
             p = G.pick_product(prods)
             if not p:
-                notes.append("%s: sin imagen válida que quepa en la nube; paso a la siguiente." % r.get("obs_id"))
+                notes.append("%s: sin imagen válida y pública que quepa en la nube; paso a la siguiente." % r.get("obs_id"))
                 continue
-            with st.spinner("🧠 Descargando %s (%s MB)…" % (p["filename"], p.get("size_mb"))):
-                data = download_product(p["uri"], p["filename"], size_mb=p.get("size_mb"))
+            try:
+                with st.spinner("🧠 Descargando %s (%s MB)…" % (p["filename"], p.get("size_mb"))):
+                    data = download_product(p["uri"], p["filename"], size_mb=p.get("size_mb"))
+            except ExclusiveAccessError:
+                # MAST no siempre marca la fila: si la descarga da 401, se prueba la siguiente.
+                notes.append("%s: 🔒 acceso exclusivo (MAST respondió 401); paso a la siguiente." % p["filename"])
+                ss["guide_obs_used"] = (ss.get("guide_obs_used") or []) + [r.get("obs_id")]
+                continue
+            except RuntimeError as exc:
+                notes.append("%s: la descarga falló (%s); paso a la siguiente." % (p["filename"], exc))
+                continue
             src = dict(r)
             src.update({"archive": "MAST", "product": p["filename"], "uri": p["uri"],
                         "download_url": p["download_url"], "acknowledgement": MAST_ACK})
@@ -527,7 +545,7 @@ def _autopilot(kind, obj, mission, radius):
                          % (p["filename"], r.get("filters") or "—", p.get("size_mb")))
             break
         else:
-            notes.append("Ninguna de las %d observaciones revisadas tenía una imagen válida que quepa en la nube. "
+            notes.append("Ninguna de las %d observaciones revisadas tenía una imagen válida, pública y que quepa en la nube. "
                          "Prueba otro objeto, otra misión o un radio mayor." % len(candidates))
     except Exception as exc:
         notes.append("No pude completarlo: %s" % exc)
@@ -571,11 +589,15 @@ if source_kind == "Archivo MAST (STScI)":
         m4.metric("En la tabla", res["n_shown"])
         st.caption("Búsqueda: '%s', radio %.2f°. %s" % (res["target"], res["radius_deg"],
                    "Se muestran las primeras %d imágenes." % res["n_shown"] if res["truncated"] else "Se muestran todas las imágenes."))
+        if res.get("n_locked"):
+            st.caption("🔒 %d en periodo de acceso exclusivo (al final de la tabla): MAST las lista, pero solo el equipo "
+                       "del programa puede descargarlas hasta la fecha indicada." % res["n_locked"])
         rows = res["rows"]
         if not rows:
             st.warning("MAST no devolvió imágenes de esta misión para este objeto. Prueba otra misión, otro nombre o un radio mayor.")
         else:
-            table = [{"misión": r["mission"], "instrumento": r["instrument"], "filtro": r["filters"], "objeto": r["target"],
+            table = [{"acceso": "público" if r.get("is_public", True) else "🔒 hasta %s" % (r.get("release_date") or "—"),
+                      "misión": r["mission"], "instrumento": r["instrument"], "filtro": r["filters"], "objeto": r["target"],
                       "fecha": r["date_obs"], "exp (s)": r["t_exptime"], "programa": r["proposal_id"], "PI": r["proposal_pi"],
                       "obs_id": r["obs_id"]} for r in rows]
             st.markdown("Haz clic en una fila para ver su procedencia.")
@@ -619,12 +641,16 @@ if source_kind == "Archivo MAST (STScI)":
         if not shown:
             st.warning("Esta observación no tiene imágenes 2D. Desactiva el filtro para ver todo o elige otra fila.")
         else:
-            ptable = [{"archivo": p["filename"], "MB": p["size_mb"], "imagen 2D": "sí" if p["is_image"] else "no", "nota": p["hint"]} for p in shown]
+            ptable = [{"archivo": p["filename"], "MB": p["size_mb"], "imagen 2D": "sí" if p["is_image"] else "no",
+                       "acceso": "público" if p.get("is_public", True) else "🔒 exclusivo", "nota": p["hint"]} for p in shown]
             pev = st.dataframe(ptable, hide_index=True, use_container_width=True, on_select="rerun",
                                selection_mode="single-row", key="prod_table")
             if pev.selection.rows:
                 p = shown[pev.selection.rows[0]]
                 reason = ("Pesa más de %d MB." % int(MAX_CLOUD_MB)) if p["too_big"] else ("No es una imagen 2D." if not p["is_image"] else "")
+                if not p.get("is_public", True):
+                    reason = ("🔒 En periodo de acceso exclusivo: solo el equipo del programa puede descargarlo "
+                              "(MAST respondería 401). Elige otra observación.")
                 if reason:
                     st.warning(reason)
                 if p["download_url"]:

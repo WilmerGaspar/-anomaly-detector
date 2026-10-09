@@ -71,18 +71,19 @@ def _render_guide():
     acciones (piloto automático, analizar) solo ponen una marca y se ejecutan más abajo."""
     import json as _json
 
+    import ai_panel as AI
     import guide as G
     ss = st.session_state
     obj = ss.get("obj_free") if ss.get("obj_pick") == "Otro…" else ss.get("obj_pick")
     field_ok = bool(ss.get("field_path")) and os.path.exists(ss.get("field_path") or "")
     R = ss.get("results")
-    card, level = None, None
+    card, level, gate = None, None, None
     if R and field_ok and R.get("key") and R["key"][0] == ss.get("field_name"):
         card = _json.loads(R["json"])
         from discovery import evaluate
         refs = G.references_from_log(ss.get("guide_log"), R["key"])
-        level = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"),
-                         references=refs or None)["level"]
+        gate = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"), references=refs or None)
+        level = gate["level"]
     msg = G.next_step({"mode": "image", "source_kind": ss.get("source_kind", "Archivo MAST (STScI)"),
                        "mission": ss.get("mission", next(iter(CURATED))), "obj": obj or (CURATED[next(iter(CURATED))][0]),
                        "has_search": bool(ss.get("search")), "has_prods": ss.get("prods") is not None,
@@ -97,29 +98,34 @@ def _render_guide():
             st.markdown(msg["text"])
             for i, step in enumerate(msg["steps"], 1):
                 st.markdown("%d. %s" % (i, step))
-        labels = {"auto": "▶ Hazlo por mí (buscar, cargar y analizar)", "auto_analyze": "▶ Analizar por mí",
-                  "other_filter": "▶ Otro archivo del mismo objeto"}
         for a in msg["actions"]:
-            if st.button(labels[a], type="primary", key="guide_" + a, use_container_width=True):
-                ss["guide_note"] = []
-                if a == "auto_analyze":
-                    ss["auto_analyze"] = True
-                else:
-                    ss["autopilot"] = "other" if a == "other_filter" else "full"
-                st.rerun()
+            if st.button(AI.ACTION_LABELS[a], type="primary", key="guide_" + a, use_container_width=True):
+                _guide_action(a)
         log = ss.get("guide_log") or []
         if log:
             with st.expander("Bitácora de esta sesión (%d): %s" % (len(log), G.log_summary(log))):
                 for e in log:
                     st.markdown("%s %s · %s" % (e.get("icon") or "·", e.get("file") or "—", e.get("filter") or "—"))
                 st.caption("La pestaña Novedad usa estos análisis como referencia (mínimo 5).")
-        q = st.text_input("Pregunta al glosario", key="guide_q", placeholder="¿Qué es β?")
+        q = st.text_input("Pregunta (glosario e IA conectadas)", key="guide_q", placeholder="¿Qué es β?")
         if q:
             ans = G.answer(q)
             with st.chat_message("assistant", avatar="📖"):
                 st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
-        st.caption("La guía sigue reglas fijas: no es una IA y no inventa. Gratis y sin conexión.")
+        st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
+        AI.render(q, card, msg, log, gate, _guide_action)
         st.divider()
+
+
+def _guide_action(a):
+    """Botones ▶ de la guía y propuesta aceptada de las IA: ponen la marca y recargan."""
+    ss = st.session_state
+    ss["guide_note"] = []
+    if a == "auto_analyze":
+        ss["auto_analyze"] = True
+    else:
+        ss["autopilot"] = "other" if a == "other_filter" else "full"
+    st.rerun()
 
 
 _render_guide()

@@ -178,10 +178,10 @@ def novelty_vs_references(card, references, min_refs=5):
     out = {"n_references": len(refs), "per_descriptor": {}, "max_abs_z": None, "available": len(refs) >= min_refs}
     if len(same) < len(references):
         out["n_excluded_old"] = len(references) - len(same)
-        out["excluded_note"] = ("%d JSON de referencia son de una versión anterior de los descriptores (antes del "
-                                "9-oct-2026: D0 fractal, β, entropía y dirección de anisotropía se medían con errores) y "
-                                "no se usan: compararlos daría diferencias falsas. Vuelve a analizar esos archivos."
-                                % out["n_excluded_old"])
+        out["excluded_note"] = ("%d JSON de referencia son de una versión anterior de los descriptores (versión "
+                                "actual %d; desde el 9-oct-2026 cambió cómo se miden D0 fractal, β, entropía y "
+                                "anisotropía) y no se usan: compararlos daría diferencias falsas. Vuelve a analizar "
+                                "esos archivos." % (out["n_excluded_old"], DESCRIPTORS_VERSION))
     if not out["available"]:
         out["note"] = "Hacen falta al menos %d análisis previos (JSON) como referencia." % min_refs
         return out
@@ -267,7 +267,10 @@ def evaluate(card, masked=None, replicate=None, references=None):
     elif masked is not None:
         survives = masked["fdr_pass"] or ridge_pass
         n_m = masked.get("n_masked", 0)
-        detail = "%d fuentes (≥ %.0fσ) y sus picos enmascarados (%.1f %% del área) → FDR %d/4%s" % (
+        # "objetos compactos", no "fuentes": con ruido de cola pesada (pixeles calientes, restos de
+        # rayos cosmicos) el detector tambien los marca (medido: cientos en ruido t de Student).
+        detail = "%d objetos compactos (≥ %.0fσ: estrellas, galaxias o picos de ruido) y sus picos enmascarados " \
+                 "(%.1f %% del área) → FDR %d/4%s" % (
             n_m, masked.get("nsig", 5), 100 * masked["masked_fraction"], masked["n_passed"],
             "; crestas %.4f" % ridge if ridge_pass else "")
         add("No la explican las fuentes puntuales", survives if (n_m or n_src) else True,

@@ -128,3 +128,31 @@ def test_spectrum_beta_not_steepened_by_the_256px_reduction(beta):
     fits = [full_analytics(_field(630, beta, s), seed=s)["spectrum"]["fit"] for s in range(3)]
     assert abs(np.mean([f["beta"] for f in fits]) - beta) < 0.08
     assert all(f["k_min"] == 0.02 and f["k_max"] == 0.25 and np.isfinite(f["intercept"]) for f in fits)
+
+
+def _crop(beta, seed, n=630, big=1024, stretch=1.0):
+    rng = np.random.default_rng(seed)
+    ky, kx = np.fft.fftfreq(big)[:, None], np.fft.fftfreq(big)[None]
+    k = np.hypot(ky * stretch, kx)
+    k[0, 0] = 1
+    f = np.fft.ifft2(np.fft.fft2(rng.normal(size=(big, big))) * k ** (-beta / 2)).real
+    return f[100:100 + n, 200:200 + n] / f.std()
+
+
+def test_kolmogorov_beta_on_a_non_periodic_crop_with_a_gradient():
+    """Sin ventana, los bordes arrastraban β hacia 3 (3.05 para 3.67; 2.45 frente a 1.66 en MIRI real)."""
+    from plugins.kolmogorov_1941 import Kolmogorov1941
+    xx = np.mgrid[:630, :630][1]
+    for beta in (1.5, 3.67):
+        vals = [Kolmogorov1941().analyze(_crop(beta, s) + 3.0 * xx / 630)["beta"] for s in range(2)]
+        assert abs(np.mean(vals) - beta) < 0.2, (beta, vals)
+
+
+def test_orientation_test_finds_alignment_and_ignores_gradients():
+    """Dirección preferente frente a campos isótropos con el mismo espectro (fila del campo magnético)."""
+    from plugins.anisotropy import orientation_test
+    xx = np.mgrid[:630, :630][1]
+    iso = orientation_test(_crop(2.5, 0) + 20.0 * xx / 630, n_null=49)        # gradiente fuerte, sin dirección propia
+    assert iso["orientation_p"] > 0.05
+    aligned = orientation_test(_crop(2.5, 0, stretch=1.5), n_null=49)
+    assert aligned["orientation_p"] <= 0.02 and aligned["orientation_coherence"] > aligned["orientation_null_q95"]

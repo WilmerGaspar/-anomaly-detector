@@ -647,3 +647,62 @@ publicados. Para cada mecanismo muestra cinco columnas:
      referencias) y en el JSON (`hypotheses`). Probado con los JSON reales: el NIRCam F200W
      🟢 sale compatible con turbulencia supersónica y con orden magnético; los ⚪ y 🔴 no
      generan tabla.
+
+## 🧠 Guía en la barra lateral (gratis, por reglas, sin IA de pago)
+
+El objetivo: menos tiempo frente al PC y saber siempre qué hacer después. No es un modelo
+de lenguaje: son reglas fijas (`guide.py`), así que no tiene coste, funciona sin conexión y
+no puede inventar.
+
+105. **Ventana de chat con el siguiente paso**, según el punto en que esté la app: buscar →
+     elegir observación → elegir archivo → analizar → interpretar. Tras un análisis traduce
+     el semáforo a lenguaje claro y da los procedimientos concretos (mover la región, otra
+     exposición, otro filtro, abrir 🧪 Hipótesis, descargar el JSON…). Solo nombra botones
+     que existen en pantalla (con un archivo propio no ofrece los de MAST).
+106. **▶ Hazlo por mí**: en un clic busca en MAST, revisa hasta 6 observaciones, elige la
+     primera imagen válida que quepa en la nube (i2d/drz/drc primero), la descarga, la
+     analiza con la región por defecto y explica el resultado. Escribe en la guía lo que hizo
+     (incluidas las observaciones que descartó y por qué).
+107. **▶ Otro archivo del mismo objeto**: repite con otra observación y prueba primero los
+     filtros aún no analizados (la confirmación que piden las hipótesis). Reutiliza la
+     búsqueda y no repite observaciones ya usadas.
+108. **▶ Analizar por mí** y **bitácora de la sesión**: los análisis se guardan (sin
+     duplicar la misma región) y la pestaña Novedad los usa como referencia sin subir JSON.
+109. **Glosario**: responde preguntas como "¿qué es β?" solo con textos escritos en
+     `guide.py`; si la pregunta no está, lo dice.
+110. Tests: lógica de la guía (23) y piloto automático de punta a punta en la app real
+     (`streamlit.testing`) con MAST simulado: busca, descarta la observación sin imagen,
+     carga y analiza la buena, la guía interpreta y la bitácora guarda. Desde este entorno
+     no hay acceso a MAST: falta probarlo contra el servidor real.
+
+## 🤖 IA conectadas: varias IA gratuitas a la vez, con semáforo
+
+Opcional y sin coste: cada IA se activa poniendo su clave gratuita en Streamlit → Settings →
+Secrets. Sin claves la app funciona igual que antes. Las IA explican y opinan; el semáforo,
+las medidas y las hipótesis los sigue calculando la app.
+
+111. **Semáforo por IA** (`ai_hub.py`, `ai_panel.py`) para NVIDIA build, Groq, OpenRouter
+     (modelos `:free`) y Google Gemini, las cuatro con API compatible con OpenAI: ⚪ sin
+     clave · 🟡 sin probar · 🟢 conectada (con el tiempo de respuesta) · 🔴 error con el
+     motivo (clave no válida, modelo no encontrado, límite gratuito, servicio caído, sin
+     red). Se prueba una vez al abrir, con «🔄 Probar conexiones» y cuando cambian las claves.
+     El modelo se cambia en Secrets (`<PROVEEDOR>_MODEL`) sin tocar código. A los modelos que
+     razonan (gpt-oss en Groq, Gemini) se les pide razonamiento corto para que no gasten los
+     tokens antes de responder; si el servicio no acepta la opción, se repite sin ella.
+112. **Consejo**: la misma pregunta a todas las IA conectadas en paralelo (si no escribes
+     nada: «explícame el resultado y el siguiente paso»). Solo reciben el resumen del
+     análisis (archivo, filtro, semáforo con sus comprobaciones, p y FDR, medidas, tabla de
+     hipótesis, bitácora) y la pregunta; nunca la clave ni la imagen.
+113. **Cada respuesta se comprueba con código**: los números que cita deben estar en los
+     datos (se admite el redondeo y los porcentajes) y no puede afirmar descubrimientos
+     («hemos descubierto», «física nueva», «sin duda»…). Pasa ✅ o se marca ⚠️ con el motivo.
+114. **Propuesta de acción con confirmación**: cada IA puede proponer una acción de una lista
+     fija (las que la guía ofrece en ese momento). La propuesta de la mayoría de las
+     respuestas que pasan la comprobación aparece como botón «✅ Aceptar la propuesta (n de
+     N IA)»; la IA nunca ejecuta nada sola. Si la app cambió de paso, no se ofrece.
+115. Tests: 23 de `ai_hub` (peticiones simuladas: códigos HTTP, tiempo agotado, respuestas
+     vacías o con borrador de razonamiento, verificación, acciones, consenso, contexto) y 2
+     en la app real: sin claves todo ⚪ y no se envía nada; con claves simuladas el semáforo,
+     el consejo, la clave que nunca aparece en pantalla y la propuesta aceptada que busca,
+     carga y analiza. Desde este entorno no hay acceso a los servidores de las IA: falta
+     probar con claves reales.

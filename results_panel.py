@@ -115,9 +115,21 @@ def _tab_spectrum(A):
     fig.update_yaxes(type="log", title="P(k)")
     c1, c2 = st.columns([3, 1])
     c1.plotly_chart(_layout(fig, height=420, title="Espectro de potencia radial"), use_container_width=True)
-    c2.metric("β (pendiente)", "%.2f" % fit["beta"] if np.isfinite(fit["beta"]) else "—")
-    c2.metric("R² del ajuste", "%.3f" % fit["r2"] if np.isfinite(fit["r2"]) else "—")
+    beta_ok = fit.get("beta") is not None and np.isfinite(fit["beta"])
+    c2.metric("β (pendiente)" + (" corregida" if fit.get("psf_corrected") else ""), "%.2f" % fit["beta"] if beta_ok else "—")
+    c2.metric("R² del ajuste", "%.3f" % fit["r2"] if fit.get("r2") is not None and np.isfinite(fit["r2"]) else "—")
     c2.caption("Rango del ajuste: k = %.2f–%.2f (%d puntos)." % (fit["k_min"], fit["k_max"], fit["n_points"]))
+    if fit.get("psf_corrected"):
+        raw = fit.get("beta_raw")
+        c2.caption("β corregida por la difracción del telescopio (el espectro se divide por su respuesta y solo se "
+                   "ajustan las escalas que el telescopio aún resuelve). Sin corregir: %s. En MIRI de onda larga la "
+                   "difracción empina mucho β (simulado: 2.5 → 3.6 en F2100W)." % ("%.2f" % raw if raw is not None else "—"))
+        if fit.get("psf_limited"):
+            c2.warning("La difracción no deja escalas suficientes para medir β en esta región: usa una región más "
+                       "grande o un filtro de menor longitud de onda.")
+    else:
+        c2.caption("β sin corregir por la difracción (falta el telescopio, el filtro o la escala de píxel en la "
+                   "cabecera): con JWST sale más empinada de lo real.")
     c2.caption("Referencias: β≈11/3 turbulencia de Kolmogorov (densidad), β≈3 bordes nítidos (ley de Porod: un "
                "frente o el borde de una nube; en 2D no es 2), β≈0 ruido blanco. "
                "Un R² bajo indica que no hay ley de potencia única (dos regímenes o un pico).")

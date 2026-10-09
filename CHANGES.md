@@ -828,3 +828,32 @@ de golpe en el frente de ionización.
      en 1D; en 2D es β≈3. El glosario explica que un borde da β≈3 por sí mismo.
 138. La fila del campo magnético, con un JSON sin prueba de dirección, dice «JSON de una
      versión anterior de la app: repite el análisis».
+
+## β corregido por la difracción del telescopio y ángulos en el cielo (`psf.py`)
+
+Al repetir NGC 7023 MIRI F2100W con la versión 3: β = 3.72 (≈ 11/3, «Kolmogorov»), cuando
+el mismo filamento con F1000W daba 1.54. La difracción explica una parte grande: JWST está
+muestreado casi al límite y su respuesta (MTF) cae dentro de las escalas donde se ajusta β.
+
+139. **Medido** con campos sintéticos de β conocido pasados por la MTF de una apertura de
+     6.5 m (630 px): MIRI F2100W 2.50 → 3.58 y 3.67 → 4.6-4.8; F1000W 2.50 → 2.84; F770W →
+     2.76; NIRCam F410M → 2.74; F200W → 2.8-2.9. Incluso NIRCam empina β unas 0.3.
+140. **Corrección**: el espectro se divide por la MTF² de la difracción y solo se ajusta hasta
+     0.4 de la frecuencia de corte D/λ (MTF² ≥ 0.25). Simulado, con ruido después de la PSF:
+     F2100W 2.43-2.65 (β 2.5) y 3.75-3.85 (3.67); F1000W 2.41-2.54 y 3.64-3.69; F200W 2.51-2.56
+     y 3.67-3.77. La MTF es la de una apertura circular sin obstrucción; la de JWST (hexagonal,
+     con secundario) y el muestreo del detector la bajan algo más, así que la corrección se queda
+     corta si acaso. Si la difracción deja menos de un factor 3 de escalas, β queda «no medible»
+     y lo dicen las filas de turbulencia y bordes.
+141. **Longitud de onda desde el nombre del filtro** (JWST: F2100W = 21.0 µm; HST WFC3/IR:
+     F125W = 1.25 µm; ópticos: F814W = 0.814 µm) y **escala de píxel desde el WCS** del FITS.
+     Sin telescopio, filtro o escala, no se corrige y la pestaña lo avisa.
+142. Las dos β (espectro y Kolmogorov) usan la misma corrección y guardan la de antes
+     (`beta_raw`). Las filas de hipótesis dicen «corregido por la difracción; sin corregir X».
+143. **Ángulos en el cielo**: el JSON lleva el centro de la región (`center_ra_deg`,
+     `center_dec_deg`) y la dirección de las estructuras como ángulo de posición (`structure_pa_deg`,
+     este desde el norte). Los ángulos en píxeles no se comparan entre observaciones, que pueden
+     estar giradas. Ejemplo: F2100W 17° frente a F1000W −20° en NGC 7023.
+144. `DESCRIPTORS_VERSION = 4`. Tests: longitudes de onda por filtro, frecuencia de corte y FWHM
+     de MIRI F2100W (~6 px), β corregido en las dos medidas, β no medible con una región pequeña en
+     F2550W, ángulos en el cielo con WCS girados y análisis de punta a punta con WCS.

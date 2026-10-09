@@ -162,7 +162,21 @@ def surrogate_preview(image, seed=None, max_side=256):
     return small, iaaft_surrogate(small, np.random.default_rng(seed))
 
 
-def spectrum_fit_full_resolution(image, small_shape, k_min=0.02, k_max=0.25):
+def psf_corrected_fit(k, p, k_min, k_max, nu_c):
+    """Ajuste de β dividiendo por la MTF² de la difracción y solo hasta X_MAX·ν_c (ver psf.py).
+    Si el rango útil queda por debajo de MIN_RANGE, beta = NaN: la difracción no deja medirlo."""
+    from psf import MIN_RANGE, X_MAX, mtf
+    hi = min(k_max, X_MAX * nu_c)
+    if hi / k_min < MIN_RANGE:
+        return {"beta": float("nan"), "r2": float("nan"), "k_min": k_min, "k_max": hi, "n_points": 0,
+                "psf_limited": True}
+    m2 = np.maximum(mtf(k, nu_c) ** 2, 1e-6)
+    fit = fit_power_law(k, np.asarray(p) / m2, k_min=k_min, k_max=hi)
+    fit["psf_limited"] = False
+    return fit
+
+
+def spectrum_fit_full_resolution(image, small_shape, k_min=0.02, k_max=0.25, nu_c=None):
     """beta sin el filtro de la reduccion a 256 px. La reduccion (resize con antialiasing) es un
     filtro paso bajo: empinaba el espectro y beta salia ~0.15 alto en regiones de mas de 256 px
     (medido con campos sinteticos de beta conocido: 3.87 para 3.67, 2.68 para 2.5). Se ajusta
@@ -173,20 +187,26 @@ def spectrum_fit_full_resolution(image, small_shape, k_min=0.02, k_max=0.25):
     kf, pf = radial_power_spectrum(image)
     fit = fit_power_law(kf, pf, k_min=k_min * f, k_max=k_max * f)
     fit.update(k_min=k_min, k_max=k_max, resolution="completa (%d px)" % side)
+    if nu_c:
+        corr = psf_corrected_fit(kf, pf, k_min * f, k_max * f, nu_c)
+        fit = dict(fit, beta_raw=fit["beta"], r2_raw=fit["r2"], beta=corr["beta"], r2=corr["r2"],
+                   psf_corrected=True, psf_limited=corr["psf_limited"], n_points=corr["n_points"],
+                   k_max=min(k_max, corr["k_max"] / f))   # en ciclos/pixel reducido, como la grafica
     return fit
 
 
-def full_analytics(image, seed=None, valid=None):
-    """Todo el paquete analitico en un dict serializable a JSON."""
+def full_analytics(image, seed=None, valid=None, nu_c=None):
+    """Todo el paquete analitico en un dict serializable a JSON. `nu_c`: corte de la difraccion en
+    ciclos/pixel (psf.py); con el, beta se corrige por la MTF y beta_raw guarda el de antes."""
     small = downsample_for_null(image, max_side=256)
     k, p = radial_power_spectrum(small)
     surr = iaaft_surrogate(small, np.random.default_rng(seed))
     _, pn = radial_power_spectrum(small, window=False)
     _, ps = radial_power_spectrum(surr, window=False)
-    if small.shape == np.shape(image):
+    if small.shape == np.shape(image) and not nu_c:
         fit = fit_power_law(k, p)
     else:
-        fit = spectrum_fit_full_resolution(image, small.shape)
+        fit = spectrum_fit_full_resolution(image, small.shape, nu_c=nu_c)
         # Recta de la grafica: misma pendiente, ordenada ajustada a la curva reducida.
         sel = (k >= fit["k_min"]) & (k <= fit["k_max"]) & (p > 0)
         if np.isfinite(fit["beta"]) and sel.any():

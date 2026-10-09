@@ -79,8 +79,9 @@ def fit_beta_with_error(k, Pr, n_bins=12):
     }
 
 class Kolmogorov1941:
-    def __init__(self, num_shells=20):
+    def __init__(self, num_shells=20, nu_c=None):
         self.num_shells = num_shells
+        self.nu_c = nu_c            # corte de la difraccion (ciclos/pixel); ver psf.py
 
     def analyze(self, image):
         img = np.asarray(image, dtype=np.float64)
@@ -95,6 +96,20 @@ class Kolmogorov1941:
         power = np.abs(fft.fftshift(fft.fft2((img - img.mean()) * win))) ** 2
         k_values, spectrum_radial = self._radial_average(power)
         fit = fit_beta_with_error(k_values, spectrum_radial)
+        psf = None
+        if self.nu_c:
+            # Misma correccion que el espectro de la grafica: P / MTF^2 hasta X_MAX * nu_c.
+            from psf import MIN_RANGE, X_MAX, mtf
+            side = float(min(h, w))
+            keep = k_values / side <= X_MAX * self.nu_c
+            raw = fit
+            if keep.sum() >= 8 and k_values[keep].max() / max(k_values[keep].min(), 1e-9) >= MIN_RANGE:
+                m2 = np.maximum(mtf(k_values[keep] / side, self.nu_c) ** 2, 1e-6)
+                fit = fit_beta_with_error(k_values[keep], spectrum_radial[keep] / m2)
+            else:
+                fit = {"beta": float("nan"), "beta_se": float("nan"), "r_squared": 0.0,
+                       "k_range": [float("nan"), float("nan")], "n_k_bins": int(keep.sum())}
+            psf = {"beta_raw": raw["beta"], "corrected": True}
         kurt = k62_intermittency(img)
         iso = isotropic_score(img)
         clipped = False
@@ -120,6 +135,8 @@ class Kolmogorov1941:
             "intermittency_clipped": clipped,
             "turbulence_intensity": float(np.clip(1.0 - (inter if np.isfinite(inter) else 0.0) * 0.5, 0.0, 1.0)),
             "isotropic_score": iso if np.isfinite(iso) else float("nan"),
+            "beta_raw": psf["beta_raw"] if psf else beta,
+            "psf_corrected": bool(psf),
         }
 
     def _radial_average(self, power_spectrum):

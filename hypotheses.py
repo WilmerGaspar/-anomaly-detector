@@ -48,6 +48,10 @@ def measurements(card):
     return {
         "beta": _get(card, "analytics", "spectrum", "fit", "beta"),
         "beta_r2": _get(card, "analytics", "spectrum", "fit", "r2"),
+        # β corregido por la difracción (psf.py) o, si la difracción no deja escalas útiles, sin β.
+        "beta_psf": bool(((card.get("analytics") or {}).get("spectrum") or {}).get("fit", {}).get("psf_corrected")),
+        "beta_psf_limited": bool(((card.get("analytics") or {}).get("spectrum") or {}).get("fit", {}).get("psf_limited")),
+        "beta_raw": _get(card, "analytics", "spectrum", "fit", "beta_raw"),
         "intermittent": inter,
         "filament_excess": _get(card, "descriptors", "ridges", "filament_excess"),
         # Dirección preferente frente a campos isótropos con el mismo espectro (plugins/anisotropy).
@@ -57,6 +61,7 @@ def measurements(card):
         "orientation_coherence": _get(card, "descriptors", "anisotropy", "orientation_coherence"),
         "orientation_null_q95": _get(card, "descriptors", "anisotropy", "orientation_null_q95"),
         "structure_direction": _get(card, "descriptors", "anisotropy", "structure_direction_degrees"),
+        "structure_pa": _get(card, "descriptors", "anisotropy", "structure_pa_deg"),
         "anisotropy_index": _get(card, "descriptors", "anisotropy", "anisotropy_index"),
         "betti_1": _get(card, "descriptors", "persistent_homology", "betti_1"),
         "lacunarity": _get(card, "descriptors", "fractal_base", "lacunarity"),
@@ -70,21 +75,36 @@ def _fmt(v, nd=2):
     return "—" if v is None else ("%." + str(nd) + "f") % v
 
 
+PSF_LIMITED = ("la difracción del telescopio no deja escalas útiles para β en esta región: usa una región más "
+               "grande o un filtro de menor longitud de onda")
+
+
+def _beta_note(m):
+    """Cómo se obtuvo β, para que la fila lo diga."""
+    if m.get("beta_psf") and m.get("beta_raw") is not None:
+        return " (corregido por la difracción; sin corregir %.2f)" % m["beta_raw"]
+    return ""
+
+
 def _k41(m):
     b, r2 = m["beta"], m["beta_r2"]
+    if m.get("beta_psf_limited"):
+        return NOT_MEASURABLE, PSF_LIMITED
     if b is None or r2 is None or r2 < 0.9:
         return NOT_MEASURABLE, "β sin ley de potencia clara (R² = %s)" % _fmt(r2)
     ok = 3.3 <= b <= 4.0
-    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f (esperado 3.3–4.0; 11/3 ≈ 3.67)" % b
+    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f%s (esperado 3.3–4.0; 11/3 ≈ 3.67)" % (b, _beta_note(m))
 
 
 def _supersonic(m):
     b, r2 = m["beta"], m["beta_r2"]
+    if m.get("beta_psf_limited"):
+        return NOT_MEASURABLE, PSF_LIMITED
     if b is None or r2 is None or r2 < 0.9 or m["intermittent"] is None:
         return NOT_MEASURABLE, "falta β con ajuste claro o la curtosis por escalas"
     ok = 2.0 <= b < 3.3 and m["intermittent"]
-    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f (esperado 2.0–3.3) e intermitencia %s%s" % (
-        b, "por encima del nulo" if m["intermittent"] else "dentro del nulo",
+    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f%s (esperado 2.0–3.3) e intermitencia %s%s" % (
+        b, _beta_note(m), "por encima del nulo" if m["intermittent"] else "dentro del nulo",
         "; ojo: β ≈ 3 con intermitencia también lo da un solo borde nítido (fila de bordes)" if ok and b >= 2.7 else "")
 
 
@@ -93,6 +113,8 @@ def _edges(m):
     β ≈ 3, y los saltos de brillo hacen intermitentes los incrementos. Medido con un frente nítido
     (PSF 1 px, ruido 2 %): β 3.09, intermitente, FDR 4/4 (un 🟢 sin turbulencia); 60 discos: β 3.14."""
     b, r2 = m["beta"], m["beta_r2"]
+    if m.get("beta_psf_limited"):
+        return NOT_MEASURABLE, PSF_LIMITED
     if b is None or r2 is None or r2 < 0.9 or m["intermittent"] is None:
         return NOT_MEASURABLE, "falta β con ajuste claro o la curtosis por escalas"
     ok = 2.7 <= b <= 3.4 and m["intermittent"]
@@ -113,9 +135,10 @@ def _magnetic(m):
         return NOT_MEASURABLE, "sin prueba de dirección preferente (JSON de una versión anterior de la app: repite el análisis)"
     ok = p <= 0.01
     return (COMPATIBLE if ok else NOT_COMPATIBLE), (
-        "%s: estructuras a %s°, coherencia %.2f frente a campos sin dirección (95 %% hasta %s), p = %.2f"
-        % ("dirección preferente" if ok else "sin dirección preferente", _fmt(m["structure_direction"], 0), R,
-           _fmt(m["orientation_null_q95"]), p))
+        "%s: estructuras a %s, coherencia %.2f frente a campos sin dirección (95 %% hasta %s), p = %.2f"
+        % ("dirección preferente" if ok else "sin dirección preferente",
+           ("PA %s° en el cielo (este desde el norte)" % _fmt(m["structure_pa"], 0)) if m.get("structure_pa") is not None
+           else ("%s° en la imagen" % _fmt(m["structure_direction"], 0)), R, _fmt(m["orientation_null_q95"]), p))
 
 
 def _shells(m):

@@ -746,3 +746,27 @@ frente al nulo, no estos descriptores. Sí cambian la familia morfológica, la t
 123. Tests: dimensión 2 exacta en imágenes uniformes (cuadradas y rectangulares), cascada
      con teoría, entropía, dirección con franjas, β sin sesgo con su error, β sin el filtro
      de la reducción y referencias de versión antigua excluidas.
+
+## 🔒 Datos en acceso exclusivo (HTTP 401) y 🧠 Guía en la pantalla principal
+
+Caso real: «Orion Nebula» en JWST (438 imágenes). El piloto automático eligió
+`jw07534130001_03103_00002_mirimage_i2d.fits`, MAST respondió `401 Unauthorized` y la guía
+se detuvo con "No pude completarlo". No era un fallo de la app: los datos nuevos de JWST/HST
+tienen un periodo de acceso exclusivo (normalmente 12 meses). MAST los lista, pero solo el
+equipo del programa puede descargarlos hasta la fecha de publicación.
+
+124. **Acceso de cada observación** (`mast_client.is_public`), según `dataRights` y la fecha
+     de publicación `t_obs_release`. La tabla de búsqueda pone primero lo público, marca el
+     resto «🔒 hasta AAAA-MM-DD» y dice cuántas hay. La tabla de archivos marca los 🔒 y no
+     deja cargarlos (explica por qué).
+125. **401 → mensaje claro** (`ExclusiveAccessError`): «está en periodo de acceso exclusivo…
+     No es un fallo de la app: elige otra observación». También con «URL directa» (401/403).
+126. **El piloto automático salta las 🔒** sin listarlas. Si MAST no marca una fila y la
+     descarga da 401 (o falla), lo anota y **sigue con la siguiente** en vez de detenerse.
+127. **🧠 Guía en la pantalla principal**, en un recuadro arriba con dos columnas: a la
+     izquierda el siguiente paso, los botones ▶ y la bitácora; a la derecha la pregunta
+     (glosario), el semáforo de las IA y sus respuestas. En el móvil las columnas se apilan.
+     La barra lateral queda solo para los ajustes avanzados.
+128. Tests: estados de acceso, 401 (como estado devuelto y como excepción) frente a otros
+     errores, tabla con lo público primero, la guía que nunca elige 🔒, y el piloto
+     automático en la app real saltando una 🔒 y una con 401 hasta cargar y analizar la buena.

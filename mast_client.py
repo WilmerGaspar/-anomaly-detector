@@ -98,6 +98,38 @@ def _mjd_to_date(mjd):
         return ""
 
 
+class ExclusiveAccessError(RuntimeError):
+    """MAST respondió 401: el archivo está en periodo de acceso exclusivo (o restringido)."""
+
+
+EXCLUSIVE_MSG = ("%s está en periodo de acceso exclusivo: MAST solo deja descargarlo al equipo del programa "
+                 "hasta su fecha de publicación (HTTP 401). No es un fallo de la app: elige otra observación.")
+
+
+def _mjd_today():
+    now = _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)
+    return (now - _dt.datetime(1858, 11, 17)).total_seconds() / 86400.0
+
+
+def is_public(rights, release_mjd=None, today_mjd=None):
+    """¿Se puede descargar sin cuenta? Datos JWST/HST nuevos tienen un periodo de acceso
+    exclusivo (normalmente 12 meses): MAST los lista pero la descarga da 401 (Orion Nebula,
+    programa 7534). PUBLIC o fecha de publicación pasada -> sí; EXCLUSIVE_ACCESS/RESTRICTED
+    con fecha futura o sin fecha -> no; sin información -> se intenta."""
+    r = str(rights or "").strip().upper()
+    if r == "PUBLIC":
+        return True
+    rel = _num(release_mjd)
+    if rel is not None and rel == rel:
+        return rel <= (_mjd_today() if today_mjd is None else today_mjd)
+    return r not in ("EXCLUSIVE_ACCESS", "RESTRICTED")
+
+
+def _unauthorized(obj):
+    text = str(obj)
+    return "401" in text or "Unauthorized" in text
+
+
 def _num(v, nd=None):
     try:
         x = float(v)
@@ -163,6 +195,8 @@ def _row(rec, fallback_target=""):
         "calib_level": _get(rec, "calib_level"),
         "intent": str(_get(rec, "intentType", "")),
         "data_rights": str(_get(rec, "dataRights", "")),
+        "release_date": _mjd_to_date(_get(rec, "t_obs_release")) if _get(rec, "t_obs_release") is not None else "",
+        "is_public": is_public(_get(rec, "dataRights", ""), _get(rec, "t_obs_release")),
         "jpeg_url": jpeg if jpeg.startswith("http") else "",
         "data_url": str(_get(rec, "dataURL", "") or ""),
         "dataproduct_type": str(_get(rec, "dataproduct_type", "")).lower(),
@@ -215,6 +249,9 @@ def search_observations_detailed(target, missions, radius_deg=0.12, limit=500, i
         out["rows"].append(_row(rec, target))
         if len(out["rows"]) >= limit:
             break
+    # Primero lo que se puede descargar; las de acceso exclusivo (🔒) al final de la tabla.
+    out["rows"].sort(key=lambda r: not r["is_public"])
+    out["n_locked"] = sum(1 for r in out["rows"] if not r["is_public"])
     out["n_shown"] = len(out["rows"])
     n_rows = len(table) if table is not None else 0
     out["truncated"] = bool(n_images is not None and out["n_shown"] < n_images) or n_rows >= limit
@@ -261,6 +298,7 @@ def list_fits_products(obsid, max_mb=None):
         if "skycell" in low or too_big:
             rank = 95
         uri = str(_get(rec, "dataURI", "") or "")
+        rights = str(_get(rec, "dataRights", "") or "")
         out.append({
             "filename": name,
             "product_type": str(_get(rec, "productType", "")),
@@ -273,6 +311,8 @@ def list_fits_products(obsid, max_mb=None):
             "is_image": image,
             "hint": _hint(name, size_mb),
             "too_big": too_big,
+            "data_rights": rights,
+            "is_public": is_public(rights),
         })
     out.sort(key=lambda r: (r["rank"], 9999 if r["size_mb"] is None else r["size_mb"]))
     return out
@@ -293,9 +333,16 @@ def download_product(uri, filename, max_mb=MAX_CLOUD_MB, size_mb=None):
     tmp = Path(tempfile.mkdtemp(prefix="cms80_mast_"))
     dest = tmp / _safe_name(filename)
     try:
-        result = Observations.download_file(uri, local_path=str(dest))
+        try:
+            result = Observations.download_file(uri, local_path=str(dest))
+        except Exception as exc:
+            if _unauthorized(exc):
+                raise ExclusiveAccessError(EXCLUSIVE_MSG % filename) from exc
+            raise
         status = result[0] if isinstance(result, tuple) and result else result
         if str(status).upper() not in ("COMPLETE", "SKIPPED") or not dest.exists():
+            if _unauthorized(result):
+                raise ExclusiveAccessError(EXCLUSIVE_MSG % filename)
             raise RuntimeError("La descarga de %s falló (estado: %s)." % (filename, result))
         if dest.stat().st_size > max_mb * 1024 * 1024:
             raise RuntimeError("El FITS pesa %.0f MB y el tope es %.0f MB." % (dest.stat().st_size / 1048576, max_mb))
@@ -316,7 +363,8 @@ def download_url(url, max_mb=MAX_CLOUD_MB, timeout=TIMEOUT_SEC):
     fd, dest = tempfile.mkstemp(prefix="cms80_url_", suffix=".fits")
     total = 0
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp, os.fdopen(fd, "wb") as fh:
+        # El archivo se abre primero: si la conexion falla, el descriptor tambien se cierra.
+        with os.fdopen(fd, "wb") as fh, urllib.request.urlopen(req, timeout=timeout) as resp:
             length = resp.headers.get("Content-Length")
             if length and int(length) > cap:
                 raise RuntimeError("El archivo pesa %.0f MB y el tope es %.0f MB." % (int(length) / 1048576, max_mb))
@@ -328,8 +376,12 @@ def download_url(url, max_mb=MAX_CLOUD_MB, timeout=TIMEOUT_SEC):
                 if total > cap:
                     raise RuntimeError("El archivo supera el tope de %.0f MB." % max_mb)
                 fh.write(chunk)
-    except Exception:
+    except Exception as exc:
         if os.path.exists(dest):
             os.remove(dest)
+        if getattr(exc, "code", None) in (401, 403):
+            raise ExclusiveAccessError(
+                "El servidor pide permiso para este archivo (HTTP %d): datos en acceso exclusivo o privados. "
+                "Usa un archivo público." % exc.code) from exc
         raise
     return dest

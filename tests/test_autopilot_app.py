@@ -63,7 +63,7 @@ def test_one_click_search_load_analyze(fake_mast):
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=600)
     at.run()
     assert not at.exception
-    guide_btn = [b for b in at.sidebar.button if b.key == "guide_auto"]
+    guide_btn = [b for b in at.main.button if b.key == "guide_auto"]
     assert guide_btn, "la guía debe ofrecer ▶ Hazlo por mí al empezar"
     guide_btn[0].click().run()
     for _ in range(4):                                    # st.rerun encadena: buscar/cargar -> analizar -> guía
@@ -76,8 +76,9 @@ def test_one_click_search_load_analyze(fake_mast):
     assert len(log) == 1 and log[0]["file"] == "jw_prueba_i2d.fits"
     notes = " ".join(at.session_state["guide_note"])
     assert "obs_sin_imagen" in notes and "jw_prueba_i2d.fits" in notes
-    sidebar_text = " ".join(m.value for m in at.sidebar.markdown)
-    assert "último análisis" in sidebar_text                # la guía ya interpreta el resultado
+    main_text = " ".join(m.value for m in at.main.markdown)
+    assert "último análisis" in main_text                   # la guía ya interpreta el resultado
+    assert not [b for b in at.sidebar.button if b.key.startswith("guide_")]   # en pantalla principal
 
 
 def test_other_filter_reports_when_nothing_left(fake_mast):
@@ -85,12 +86,12 @@ def test_other_filter_reports_when_nothing_left(fake_mast):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=600)
     at.run()
-    next(b for b in at.sidebar.button if b.key == "guide_auto").click().run()
+    next(b for b in at.main.button if b.key == "guide_auto").click().run()
     for _ in range(4):
         if "guide_log" in at.session_state and at.session_state["guide_log"]:
             break
         at.run()
-    other = [b for b in at.sidebar.button if b.key == "guide_other_filter"]
+    other = [b for b in at.main.button if b.key == "guide_other_filter"]
     assert other, "con un resultado de MAST la guía ofrece ▶ Otro filtro"
     other[0].click().run()
     at.run()

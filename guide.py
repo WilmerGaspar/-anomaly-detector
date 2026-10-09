@@ -18,7 +18,8 @@ def pick_product(prods):
     """Mejor archivo para analizar: imagen 2D, que quepa en la nube. `list_fits_products` ya
     ordena por tipo (i2d/drc/drz primero) y tamaño, así que vale el primero que cumpla."""
     for p in prods or []:
-        if p.get("is_image") and not p.get("too_big") and p.get("uri"):
+        # is_public False: acceso exclusivo, MAST da 401 (solo el equipo del programa).
+        if p.get("is_image") and not p.get("too_big") and p.get("uri") and p.get("is_public", True):
             return p
     return None
 
@@ -27,7 +28,8 @@ def rows_to_try(rows, done_filters=(), done_obs=()):
     """Observaciones en orden de prueba: primero las de filtros aún no analizados (para
     confirmar en otro filtro), sin repetir observaciones ya usadas."""
     done_filters = {str(f).upper() for f in done_filters if f}
-    fresh = [r for r in rows or [] if r.get("obs_id") not in set(done_obs)]
+    # Sin las de acceso exclusivo (🔒): MAST las lista pero la descarga da 401.
+    fresh = [r for r in rows or [] if r.get("obs_id") not in set(done_obs) and r.get("is_public", True)]
     # MAST puede dar "F444W;F405N" y la cabecera "F405N": vale con que aparezca.
     new_filter = [r for r in fresh if not any(f in str(r.get("filters") or "").upper() for f in done_filters)]
     rest = [r for r in fresh if r not in new_filter]

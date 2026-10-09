@@ -86,7 +86,13 @@ class Kolmogorov1941:
         img = np.asarray(image, dtype=np.float64)
         if img.ndim > 2:
             img = img.mean(axis=2)
-        power = np.abs(fft.fftshift(fft.fft2(img))) ** 2
+        # Sin media y con ventana de Hanning, como el espectro de la grafica. Sin ventana, los
+        # bordes de la region (no periodica) meten una componente ~k^-3 que arrastra beta hacia 3:
+        # medido en recortes de campos de beta conocido, 3.67 -> 3.05; y en un MIRI F1000W real
+        # (NGC 7023) daba 2.45 frente a 1.66 con ventana, por el gradiente de brillo.
+        h, w = img.shape
+        win = np.outer(np.hanning(h), np.hanning(w))
+        power = np.abs(fft.fftshift(fft.fft2((img - img.mean()) * win))) ** 2
         k_values, spectrum_radial = self._radial_average(power)
         fit = fit_beta_with_error(k_values, spectrum_radial)
         kurt = k62_intermittency(img)

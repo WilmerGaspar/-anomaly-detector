@@ -50,7 +50,13 @@ def measurements(card):
         "beta_r2": _get(card, "analytics", "spectrum", "fit", "r2"),
         "intermittent": inter,
         "filament_excess": _get(card, "descriptors", "ridges", "filament_excess"),
-        "aniso_significant": "aniso" in (fdr.get("passed_descriptors") or []),
+        # Dirección preferente frente a campos isótropos con el mismo espectro (plugins/anisotropy).
+        # Antes se usaba que "aniso" pasara el FDR, pero ese estadístico es el coeficiente de
+        # variación de la energía del gradiente (bordes concentrados): no tiene dirección.
+        "orientation_p": _get(card, "descriptors", "anisotropy", "orientation_p"),
+        "orientation_coherence": _get(card, "descriptors", "anisotropy", "orientation_coherence"),
+        "orientation_null_q95": _get(card, "descriptors", "anisotropy", "orientation_null_q95"),
+        "structure_direction": _get(card, "descriptors", "anisotropy", "structure_direction_degrees"),
         "anisotropy_index": _get(card, "descriptors", "anisotropy", "anisotropy_index"),
         "betti_1": _get(card, "descriptors", "persistent_homology", "betti_1"),
         "lacunarity": _get(card, "descriptors", "fractal_base", "lacunarity"),
@@ -89,10 +95,14 @@ def _filaments(m):
 
 
 def _magnetic(m):
-    if m["anisotropy_index"] is None:
-        return NOT_MEASURABLE, "sin medida de anisotropía"
-    return (COMPATIBLE if m["aniso_significant"] else NOT_COMPATIBLE), "anisotropía %s frente al nulo (índice %s)" % (
-        "significativa" if m["aniso_significant"] else "no significativa", _fmt(m["anisotropy_index"]))
+    p, R = m["orientation_p"], m["orientation_coherence"]
+    if p is None or R is None:
+        return NOT_MEASURABLE, "sin prueba de dirección preferente (análisis anterior al 9-oct-2026: repítelo)"
+    ok = p <= 0.01
+    return (COMPATIBLE if ok else NOT_COMPATIBLE), (
+        "%s: estructuras a %s°, coherencia %.2f frente a campos sin dirección (95 %% hasta %s), p = %.2f"
+        % ("dirección preferente" if ok else "sin dirección preferente", _fmt(m["structure_direction"], 0), R,
+           _fmt(m["orientation_null_q95"]), p))
 
 
 def _shells(m):
@@ -154,6 +164,15 @@ MECHANISMS = [
      "predicts": "La misma estadística al cambiar de escala (autosimilaridad).",
      "question": "¿La lacunaridad y la multifractalidad se mantienen al degradar la resolución 2× y 4×?",
      "refs": "Elmegreen & Falgarone 1996, ApJ 471, 816; Chappell & Scalo 2001, ApJ 551, 712"},
+    # Física básica de las nebulosas de reflexión y regiones H II (NGC 7023, Barra de Orión, Cabeza de
+    # Caballo). Faltaba: en NGC 7023 la tabla podía decir "ningún mecanismo encaja" sin mencionarla.
+    {"key": "pdr", "name": "Frente de fotodisociación iluminado por una estrella (PDR)",
+     "rule": _never("una imagen no dice dónde está la estrella iluminadora ni separa las capas del frente"),
+     "predicts": "Borde brillante orientado hacia la estrella; capas ordenadas con la distancia a ella: PAH "
+                 "(7.7, 11.3 µm), H₂ (2.12 µm) y CO, desplazadas entre sí.",
+     "question": "¿El borde más brillante mira hacia la estrella iluminadora (en NGC 7023, HD 200775)? ¿Los filtros de "
+                 "PAH, de H₂ y del continuo del polvo muestran capas desplazadas entre sí?",
+     "refs": "Tielens & Hollenbach 1985, ApJ 291, 722; Hollenbach & Tielens 1997, ARA&A 35, 179"},
     {"key": "collapse", "name": "Colapso por autogravedad",
      "rule": _never("necesita la distribución de densidad de columna, que una imagen de brillo no da"),
      "predicts": "Cola de ley de potencia en la distribución de densidad de columna.",
@@ -197,9 +216,12 @@ def build(card, level):
                    % "; ".join(compatible))
     else:
         cls, title = "open_question", "Pregunta abierta: ningún mecanismo de la tabla encaja"
-        summary = ("La estructura es robusta pero no encaja con ningún mecanismo de esta tabla. Antes de hablar de "
-                   "física nueva: confírmala en otro filtro, otra época u otro instrumento, y descarta las alternativas "
-                   "(proyección, fuentes no resueltas).")
+        open_rows = [r["mechanism"] for r in rows if r["status"] == NOT_MEASURABLE]
+        summary = ("La estructura es robusta pero no encaja con ningún mecanismo que una imagen pueda medir. %s"
+                   "Antes de hablar de física nueva: confírmala en otro filtro, otra época u otro instrumento, y "
+                   "descarta las alternativas (proyección, fuentes no resueltas)."
+                   % ("Quedan %d sin poder medirse con una sola imagen (%s): sus preguntas van primero. "
+                      % (len(open_rows), "; ".join(open_rows)) if open_rows else ""))
     target = str((card.get("source") or {}).get("target") or "").strip()
     context = ("Objeto según la cabecera FITS: %s. " % target if target else "La cabecera no indica el objeto. ") + (
         "Las hipótesis de turbulencia, filamentos, campo magnético y burbujas son de gas y polvo interestelar: solo "

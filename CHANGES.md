@@ -770,3 +770,41 @@ equipo del programa puede descargarlos hasta la fecha de publicación.
 128. Tests: estados de acceso, 401 (como estado devuelto y como excepción) frente a otros
      errores, tabla con lo público primero, la guía que nunca elige 🔒, y el piloto
      automático en la app real saltando una 🔒 y una con 401 hasta cargar y analizar la buena.
+
+## Revisión del 🟢 de NGC 7023 en MIRI F1000W (misma región x384 y378 s630)
+
+Primer JSON con las correcciones del 9 de octubre en producción: dirección 69.8°, entropía
+7.53 bits, D0 ≥ D1 ≥ D2 y β con su error (±0.09). El 🟢 se sostiene: FDR 3/4, se repite con
+otra semilla y sigue pasando tras enmascarar lo compacto (6.4 % del área). Pero la tabla de
+hipótesis lo atribuía al campo magnético con la estadística equivocada.
+
+129. **Campo magnético: hace falta una dirección preferente.** La fila daba "compatible" si
+     pasaba el FDR la estadística `aniso`, que es el coeficiente de variación de la energía
+     del gradiente (bordes concentrados) y no tiene dirección. Nueva prueba en
+     `plugins/anisotropy.py`: coherencia R de las orientaciones locales (0 = al azar, 1 =
+     todas iguales) frente a 99 campos isótropos con el mismo espectro radial (amplitudes
+     gaussianas, generados al doble de tamaño y recortados; gradiente global quitado antes de
+     reducir). Calibrada en 240 campos sin dirección: 5.0 % con p ≤ 0.05 y 1.7 % con p ≤ 0.01.
+     Detecta estructuras alargadas un 20 % (R 0.21, p 0.01 en 6 de 6). Antes de calibrarla: con
+     amplitudes fijas el nulo salía más isótropo que un campo al azar real (25-35 % de falsos
+     positivos), y con el gradiente quitado después de reducir, 5 de 10.
+     El JSON lleva `structure_direction_degrees`, `orientation_coherence`, `orientation_p` y los
+     cuantiles del nulo. Con p ≤ 0.01 la fila es compatible y da el ángulo de las estructuras.
+130. **β de Kolmogorov con ventana de Hanning y sin media.** Sin ventana, los bordes de la
+     región (no periódica) arrastraban β hacia ~3: 3.05 para 3.67 en recortes de campos de β
+     conocido, y en este MIRI F1000W 2.45 frente a 1.66 con ventana, por el gradiente de
+     brillo. Ahora: 1.40-1.51 (β 1.5), 2.46-2.53 (2.5) y 3.53-3.82 (3.67), con o sin gradiente.
+131. **Nueva hipótesis: frente de fotodisociación (PDR)** (Tielens & Hollenbach 1985; Hollenbach
+     & Tielens 1997). Es la física básica de NGC 7023, la Barra de Orión o la Cabeza de Caballo, y
+     faltaba. Una imagen sola no la mide; su pregunta pide la estrella iluminadora y las capas
+     PAH / H₂ / polvo en varios filtros. Si nada medible encaja, el resumen lista ahora lo que no se
+     pudo medir, para no presentar como "pregunta abierta" lo que es falta de datos.
+132. **"Objetos compactos", no "fuentes"**: el detector a 5σ no inventa nada con ruido gaussiano
+     (0 detecciones), pero con ruido de cola pesada (píxeles calientes, restos de rayos cósmicos)
+     marca cientos. Las 668 "fuentes" de este JSON son en su mayoría eso. El control sigue siendo
+     válido, porque tampoco ese ruido engaña al FDR (0/4 en cuatro casos de ruido con y sin campo).
+133. `DESCRIPTORS_VERSION = 3`: Novedad no mezcla JSON de las versiones 1 y 2 (β de Kolmogorov
+     distinto).
+134. Comprobado y descartado: la diferencia de pendiente entre escalas grandes y pequeñas
+     (1.99 frente a 1.60 en este espectro) está dentro de lo que da una ley de potencia pura (hasta
+     0.9 por azar en 630 px). No prueba dos regímenes y no se añadió ese control.

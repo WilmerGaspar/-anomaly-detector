@@ -9,7 +9,9 @@ SCHEMA_VERSION = "cosmic-candidate.v0.1"
 # entropia sobre el rango real, direccion de anisotropia con la formula cerrada, beta de
 # Kolmogorov con anillos centrados (~3 % bajo) y beta del espectro sin el filtro de la reduccion
 # a 256 px (~0.15 alto en regiones grandes).
-DESCRIPTORS_VERSION = 2
+# 3 (9-oct-2026, tarde): beta de Kolmogorov con ventana (sin ella los bordes lo arrastraban hacia
+# 3: 2.45 frente a 1.66 en un MIRI F1000W real) y prueba de direccion preferente.
+DESCRIPTORS_VERSION = 3
 FDR_SCOPE = ["aniso", "flatness", "entropy", "energy_mean"]
 NOT_TESTED = ("renormalization_group", "lyapunov_stability", "fibonacci", "graph_morphology", "persistent_homology", "fractal_base", "kolmogorov_1941")
 
@@ -79,7 +81,8 @@ def _thin_descriptors(plugin_results):
                         "peak_threshold", "n_streaks", "streak_angles_deg", "lattice_consistent", "note", "p"),
         "ridges": ("filament_fraction", "filament_fraction_null", "filament_excess", "n_compact_sources", "n_spike_components",
                    "spike_fraction", "threshold", "min_length_px", "n_surrogates", "note"),
-        "anisotropy": ("anisotropy_index", "dominant_direction_degrees", "p"),
+        "anisotropy": ("anisotropy_index", "dominant_direction_degrees", "structure_direction_degrees",
+                       "orientation_coherence", "orientation_null_mean", "orientation_null_q95", "orientation_p", "p"),
         "persistent_homology": ("betti_0", "betti_1", "euler_characteristic", "p"),
         "renormalization_group": ("correlation_length", "correlation_length_clipped", "correlation_length_max_lag", "scale_invariance_score", "p", "note"),
         "lyapunov_stability": ("max_lyapunov", "dynamics_type", "p", "note"),

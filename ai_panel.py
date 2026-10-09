@@ -19,8 +19,10 @@ HOW_TO = (
     "2. En Streamlit Cloud: tu app → ⋮ → **Settings** → **Secrets** y pega una línea por clave, por ejemplo  \n"
     "`NVIDIA_API_KEY = \"nvapi-…\"`\n"
     "3. Guarda y recarga la página: si la clave es correcta, el semáforo pasa a 🟢 (puede tardar un minuto).\n\n"
-    "Nombres: `NVIDIA_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`. Opcional, para "
-    "cambiar de modelo sin tocar código: `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, `GEMINI_MODEL`.\n\n"
+    "Nombres: `NVIDIA_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`. **DeepSeek R1** usa la "
+    "misma clave de OpenRouter (gratis): con `OPENROUTER_API_KEY` se encienden las dos. Opcional, para cambiar de "
+    "modelo sin tocar código: `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, `DEEPSEEK_MODEL`, `GEMINI_MODEL`. "
+    "DeepSeek R1 piensa antes de responder: tarda más (hasta 2-3 minutos).\n\n"
     "Nunca pegues una clave en un chat ni en GitHub. A las IA solo se les envía el resumen del análisis "
     "(números públicos del telescopio) y tu pregunta."
 )

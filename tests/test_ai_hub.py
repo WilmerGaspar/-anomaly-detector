@@ -134,12 +134,14 @@ def test_ask_all_in_parallel_with_verification():
         return _Resp(content="")                              # vacía: no cuenta como respuesta
 
     out = {r["id"]: r for r in H.ask_all(ps, "¿Qué es β?", DATA, post=post)}
-    assert set(out) == {"nvidia", "groq", "openrouter"}       # Gemini sin clave no se consulta
+    # Gemini sin clave no se consulta; DeepSeek R1 usa la clave de OpenRouter.
+    assert set(out) == {"nvidia", "groq", "openrouter", "deepseek"}
     assert out["nvidia"]["ok"] and out["nvidia"]["issues"] == [] and out["nvidia"]["action"] == "auto_analyze"
     assert "ACCIÓN" not in out["nvidia"]["text"]
     assert out["groq"]["issues"] and not out["openrouter"]["ok"] and "vacía" in out["openrouter"]["detail"]
-    assert all(m["messages"][0]["content"] == H.SYSTEM_PROMPT for m in sent)
-    assert all("PREGUNTA: ¿Qué es β?" in m["messages"][1]["content"] for m in sent)
+    plain = [m for m in sent if len(m["messages"]) == 2]          # los que aceptan mensaje de sistema
+    assert len(plain) == 3 and all(m["messages"][0]["content"] == H.SYSTEM_PROMPT for m in plain)
+    assert all("PREGUNTA: ¿Qué es β?" in m["messages"][-1]["content"] for m in sent)
     status = H.status_after_answers(H.initial_status(ps), list(out.values()))
     assert status["nvidia"]["state"] == H.CONNECTED and status["openrouter"]["state"] == H.ERROR
     assert status["gemini"]["state"] == H.NO_KEY
@@ -194,3 +196,30 @@ def test_nvidia_uses_the_official_model_without_thinking():
     sent.clear()
     H.chat(_providers(NVIDIA_API_KEY="k", NVIDIA_MODEL="otro/modelo")[0], [], post=post)
     assert "chat_template_kwargs" not in sent[0]                      # otro modelo: sin opciones extra
+
+
+def test_deepseek_r1_by_openrouter_follows_its_usage_rules():
+    """DeepSeek-R1 (671B) no cabe en Streamlit Cloud: se usa por OpenRouter con la misma clave.
+    Su repositorio pide temperatura 0.5-0.7 y sin mensaje de sistema; razona antes de responder."""
+    sent = []
+
+    def post(url, headers, json, timeout):
+        sent.append((url, json, timeout))
+        return _Resp(content="<think>razono…</think>β vale 2,85.\nACCIÓN: ninguna")
+
+    ps = {p["id"]: p for p in _providers(OPENROUTER_API_KEY="sk-or-x", GROQ_API_KEY="g")}
+    ds = ps["deepseek"]
+    assert ds["api_key"] == ps["openrouter"]["api_key"] == "sk-or-x"          # una clave, dos IA
+    assert ds["model"] == "deepseek/deepseek-r1-0528:free" and H.is_reasoning(ds)
+    out = {r["id"]: r for r in H.ask_all([ds], "¿β?", DATA, post=post)}
+    url, js, timeout = sent[0]
+    assert url.startswith("https://openrouter.ai/api/v1") and js["temperature"] == 0.6
+    assert [m["role"] for m in js["messages"]] == ["user"]                    # sin mensaje de sistema
+    assert js["messages"][0]["content"].startswith(H.SYSTEM_PROMPT) and "PREGUNTA: ¿β?" in js["messages"][0]["content"]
+    assert js["max_tokens"] >= 6000 and timeout >= 150
+    assert out["deepseek"]["text"] == "β vale 2,85." and out["deepseek"]["issues"] == []   # sin el borrador
+    sent.clear()
+    assert H.ping(ds, post=post)["state"] == H.CONNECTED and sent[0][1]["max_tokens"] == 16   # prueba mínima
+    sent.clear()
+    H.chat(ps["groq"], [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}], post=post)
+    assert sent[0][1]["temperature"] == 0.2 and len(sent[0][1]["messages"]) == 2              # los demás, igual

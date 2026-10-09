@@ -867,3 +867,16 @@ muestreado casi al límite y su respuesta (MTF) cae dentro de las escalas donde 
      ejemplo pero apagada. Las respuestas son cortas y se comprueban contra los datos, y así no se
      gastan los tokens razonando. Si el servicio no la acepta (400), se repite sin ella. No se usa
      el paquete `openai`: la app ya llama al mismo endpoint (`/v1/chat/completions`) con `requests`.
+
+## DeepSeek R1, gratis por OpenRouter (con la misma clave)
+
+147. DeepSeek-R1 (licencia MIT) tiene 671B parámetros (37B activos) y sus versiones destiladas van
+     de 1.5B a 70B. No cabe en Streamlit Cloud (~690 MB de memoria y sin GPU), así que no se
+     instala: se usa por OpenRouter (`deepseek/deepseek-r1-0528:free`) con la misma
+     `OPENROUTER_API_KEY`. Aparece como una IA más en el semáforo («DeepSeek R1») y el modelo se
+     cambia con `DEEPSEEK_MODEL`.
+148. Reglas de uso de su repositorio, aplicadas a los modelos R1: temperatura 0.6 (con valores bajos
+     se repite), sin mensaje de sistema (las instrucciones van delante de la pregunta del usuario),
+     y hasta 6000 tokens y 150 s de espera, porque razona antes de responder. El borrador
+     `<think>…</think>` se quita y la respuesta pasa la misma comprobación de cifras y exageraciones.
+     La prueba de conexión sigue siendo mínima (16 tokens).

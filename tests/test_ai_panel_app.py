@@ -54,7 +54,7 @@ def test_without_keys_everything_is_white_and_nothing_is_sent(monkeypatch):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at)
-    assert "⚪ NVIDIA · ⚪ Groq · ⚪ OpenRouter · ⚪ Gemini" in text
+    assert "⚪ NVIDIA · ⚪ Groq · ⚪ OpenRouter · ⚪ DeepSeek R1 · ⚪ Gemini" in text
     assert not [b for b in at.main.button if b.key == "ai_ask"] and calls == []
 
 
@@ -67,13 +67,14 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=600)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    # Al abrir se prueba cada conexión una vez: dos 🟢, la clave mala 🔴 con el motivo, Gemini ⚪.
+    # Al abrir se prueba cada conexión una vez: dos 🟢, la clave mala 🔴 con el motivo (también
+    # en DeepSeek R1, que usa la misma clave de OpenRouter), Gemini ⚪.
     text = _texts(at)
-    assert "🟢 NVIDIA · 🟢 Groq · 🔴 OpenRouter · ⚪ Gemini" in text
+    assert "🟢 NVIDIA · 🟢 Groq · 🔴 OpenRouter · 🔴 DeepSeek R1 · ⚪ Gemini" in text
     assert "clave no válida o sin permiso (401)" in text
-    assert len(calls) == 3
+    assert len(calls) == 4
     at.run()
-    assert len(calls) == 3                                       # no se vuelve a probar en cada recarga
+    assert len(calls) == 4                                       # no se vuelve a probar en cada recarga
 
     next(b for b in at.main.button if b.key == "ai_ask").click().run()
     assert not at.exception, [e.value for e in at.exception]
@@ -98,7 +99,8 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
 
     # Con un resultado, el resumen que reciben las IA lleva las medidas reales del JSON.
     next(b for b in at.main.button if b.key == "ai_ask").click().run()
-    ctx = json.loads(calls[-1]["json"]["messages"][1]["content"].split("DATOS:\n", 1)[1].split("\n\nPREGUNTA:")[0])
+    last_nv = [c for c in calls if "nvidia" in c["url"]][-1]          # los hilos no llegan en orden
+    ctx = json.loads(last_nv["json"]["messages"][1]["content"].split("DATOS:\n", 1)[1].split("\n\nPREGUNTA:")[0])
     a = ctx["ANALISIS"]
     assert a["archivo"] == "jw_prueba_i2d.fits" and a["filtro"] == "F200W" and a["semaforo"]["nivel"]
     assert a["prueba_frente_al_nulo"]["p"] is not None and a["prueba_frente_al_nulo"]["de"] == 4

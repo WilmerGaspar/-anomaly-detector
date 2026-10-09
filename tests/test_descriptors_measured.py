@@ -156,3 +156,14 @@ def test_orientation_test_finds_alignment_and_ignores_gradients():
     assert iso["orientation_p"] > 0.05
     aligned = orientation_test(_crop(2.5, 0, stretch=1.5), n_null=49)
     assert aligned["orientation_p"] <= 0.02 and aligned["orientation_coherence"] > aligned["orientation_null_q95"]
+
+
+def test_a_single_sharp_front_gives_beta_three():
+    """Ley de Porod en 2D: un frente nítido (como un frente de ionización) da β ≈ 3, no 2."""
+    from scipy.ndimage import gaussian_filter
+    from analytics import full_analytics
+    n = 512
+    yy, xx = np.mgrid[:n, :n]
+    front = gaussian_filter((xx * np.cos(0.4) + yy * np.sin(0.4) > 250).astype(float), 1.0)
+    img = front + 0.02 * np.random.default_rng(0).normal(size=(n, n))
+    assert 2.8 <= full_analytics(img, seed=1)["spectrum"]["fit"]["beta"] <= 3.3

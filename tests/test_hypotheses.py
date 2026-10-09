@@ -69,3 +69,16 @@ def test_magnetic_needs_a_preferred_direction_not_the_fdr_aniso():
     for k in ("orientation_p", "orientation_coherence"):
         old["descriptors"]["anisotropy"].pop(k)
     assert _status(build(old, "robust"))["magnetic"] == NOT_MEASURABLE           # JSON anterior
+
+
+def test_sharp_edge_is_offered_as_alternative_to_supersonic_turbulence():
+    """Barra de Orión (NIRCam F410M): β 2.78 e intermitencia daban «turbulencia supersónica» sin
+    mencionar que un solo frente nítido produce lo mismo (ley de Porod, β ≈ 3)."""
+    H = build(_card(beta=2.95), "robust")
+    s = _status(H)
+    assert s["supersonic"] == s["edges"] == COMPATIBLE
+    sup = next(r for r in H["rows"] if r["key"] == "supersonic")
+    assert "borde nítido" in sup["why"]
+    assert "bordes nítidos" in H["summary"]
+    assert _status(build(_card(beta=2.3), "robust"))["edges"] == NOT_COMPATIBLE
+    assert _status(build(_card(beta=3.0, flat=(1, 1)), "robust"))["edges"] == NOT_COMPATIBLE   # sin intermitencia

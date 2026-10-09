@@ -118,7 +118,8 @@ def _tab_spectrum(A):
     c2.metric("β (pendiente)", "%.2f" % fit["beta"] if np.isfinite(fit["beta"]) else "—")
     c2.metric("R² del ajuste", "%.3f" % fit["r2"] if np.isfinite(fit["r2"]) else "—")
     c2.caption("Rango del ajuste: k = %.2f–%.2f (%d puntos)." % (fit["k_min"], fit["k_max"], fit["n_points"]))
-    c2.caption("Referencias: β≈11/3 turbulencia de Kolmogorov (densidad), β≈2 bordes/escalones, β≈0 ruido blanco. "
+    c2.caption("Referencias: β≈11/3 turbulencia de Kolmogorov (densidad), β≈3 bordes nítidos (ley de Porod: un "
+               "frente o el borde de una nube; en 2D no es 2), β≈0 ruido blanco. "
                "Un R² bajo indica que no hay ley de potencia única (dos regímenes o un pico).")
     c2.caption("El subrogado copia el espectro sin ventana: la curva verde y la discontinua deben solaparse; si no, "
                "el nulo no es válido para esta región. La curva con ventana (naranja) es la que se ajusta: reduce las "

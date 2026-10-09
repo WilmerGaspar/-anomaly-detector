@@ -83,7 +83,20 @@ def _supersonic(m):
     if b is None or r2 is None or r2 < 0.9 or m["intermittent"] is None:
         return NOT_MEASURABLE, "falta β con ajuste claro o la curtosis por escalas"
     ok = 2.0 <= b < 3.3 and m["intermittent"]
-    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f (esperado 2.0–3.3) e intermitencia %s" % (
+    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f (esperado 2.0–3.3) e intermitencia %s%s" % (
+        b, "por encima del nulo" if m["intermittent"] else "dentro del nulo",
+        "; ojo: β ≈ 3 con intermitencia también lo da un solo borde nítido (fila de bordes)" if ok and b >= 2.7 else "")
+
+
+def _edges(m):
+    """Ley de Porod: superficies nítidas entre dos medios dan P(k) ∝ k^-(d+1); en una imagen 2D,
+    β ≈ 3, y los saltos de brillo hacen intermitentes los incrementos. Medido con un frente nítido
+    (PSF 1 px, ruido 2 %): β 3.09, intermitente, FDR 4/4 (un 🟢 sin turbulencia); 60 discos: β 3.14."""
+    b, r2 = m["beta"], m["beta_r2"]
+    if b is None or r2 is None or r2 < 0.9 or m["intermittent"] is None:
+        return NOT_MEASURABLE, "falta β con ajuste claro o la curtosis por escalas"
+    ok = 2.7 <= b <= 3.4 and m["intermittent"]
+    return (COMPATIBLE if ok else NOT_COMPATIBLE), "β = %.2f (un borde nítido da ≈ 3) e intermitencia %s" % (
         b, "por encima del nulo" if m["intermittent"] else "dentro del nulo")
 
 
@@ -97,7 +110,7 @@ def _filaments(m):
 def _magnetic(m):
     p, R = m["orientation_p"], m["orientation_coherence"]
     if p is None or R is None:
-        return NOT_MEASURABLE, "sin prueba de dirección preferente (análisis anterior al 9-oct-2026: repítelo)"
+        return NOT_MEASURABLE, "sin prueba de dirección preferente (JSON de una versión anterior de la app: repite el análisis)"
     ok = p <= 0.01
     return (COMPATIBLE if ok else NOT_COMPATIBLE), (
         "%s: estructuras a %s°, coherencia %.2f frente a campos sin dirección (95 %% hasta %s), p = %.2f"
@@ -141,6 +154,12 @@ MECHANISMS = [
                  "anchura σ² = ln(1 + b²M²)?",
      "refs": "Kim & Ryu 2005, ApJ 630, L45; Padoan, Nordlund & Jones 1997, MNRAS 288, 145; "
              "Federrath et al. 2010, A&A 512, A81"},
+    {"key": "edges", "name": "Alternativa: bordes nítidos (un frente, un choque o el borde de una nube)", "rule": _edges,
+     "predicts": "β ≈ 3 (ley de Porod) en cualquier filtro que vea el mismo borde y la señal a lo largo de una o pocas "
+                 "líneas. Un borde nítido también aplana la turbulencia que haya debajo (medido: β 3.67 → 3.10).",
+     "question": "¿El mapa local concentra la señal a lo largo del borde? ¿Cambian β y el semáforo si eliges una región "
+                 "que no cruce el borde?",
+     "refs": "Porod 1951, Kolloid-Zeitschrift 124, 83"},
     {"key": "filaments", "name": "Filamentos de nube molecular (cuna de estrellas)", "rule": _filaments,
      "predicts": "Anchura casi constante ≈ 0.1 pc; núcleos densos a lo largo del filamento.",
      "question": "Con la distancia al objeto: ¿la anchura del perfil transversal es ≈ 0.1 pc? ¿Hay núcleos o "

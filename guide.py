@@ -180,8 +180,9 @@ GLOSSARY = [
      "«3/4 pasan» = 3 de las 4 pruebas superan esa corrección."),
     (("beta", "β", "pendiente", "espectro"),
      "β es la pendiente del espectro de potencia: cómo se reparte el brillo entre escalas grandes y pequeñas. "
-     "≈ 3.7 se asocia a turbulencia de Kolmogorov, 2–3 a turbulencia con choques. El desenfoque del telescopio y "
-     "el ruido también la cambian."),
+     "≈ 3.7 se asocia a turbulencia de Kolmogorov, 2–3 a turbulencia con choques. Ojo: un solo borde nítido (un "
+     "frente de ionización, el borde de una nube) da ≈ 3 por sí mismo (ley de Porod). El desenfoque del telescopio "
+     "y el ruido también la cambian."),
     (("lacunaridad",),
      "Lacunaridad: cuánto hueco hay entre las estructuras. ≈ 1 = repartido sin huecos; mayor = grumos separados "
      "por vacíos."),

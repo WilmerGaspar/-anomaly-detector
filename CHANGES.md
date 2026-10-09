@@ -808,3 +808,23 @@ hipótesis lo atribuía al campo magnético con la estadística equivocada.
 134. Comprobado y descartado: la diferencia de pendiente entre escalas grandes y pequeñas
      (1.99 frente a 1.60 en este espectro) está dentro de lo que da una ley de potencia pura (hasta
      0.9 por azar en 630 px). No prueba dos regímenes y no se añadió ese control.
+
+## Ley de Porod: un borde nítido también da β ≈ 3 (Barra de Orión, NIRCam F410M)
+
+Revisión del 🟢 de la Barra de Orión (programa 1288, PDRs4All; región x578 y452 s1024).
+La tabla lo atribuía a "turbulencia supersónica" por β 2.78 e intermitencia, sin mencionar
+que un solo frente nítido produce exactamente eso. F410M incluye Brα (4.05 µm), que cae
+de golpe en el frente de ionización.
+
+135. **Medido**: un frente nítido (PSF 1 px, ruido 2 %) da β 3.09, intermitencia y FDR 4/4,
+     es decir, un 🟢 sin turbulencia; 60 discos de borde nítido, β 3.14; turbulencia de
+     Kolmogorov (3.67) con un frente encima, β 3.10. Es la ley de Porod: superficies nítidas
+     dan P(k) ∝ k^-(d+1), β = 3 en una imagen 2D.
+136. **Nueva fila de hipótesis «Alternativa: bordes nítidos»** (Porod 1951): compatible con
+     2.7 ≤ β ≤ 3.4 e intermitencia. La fila de turbulencia supersónica avisa cuando β ≥ 2.7.
+     Pregunta: ¿la señal del mapa local sigue el borde? ¿Cambia al elegir una región que no lo
+     cruce?
+137. **Textos corregidos**: la pestaña del espectro decía «β≈2 bordes/escalones», que solo vale
+     en 1D; en 2D es β≈3. El glosario explica que un borde da β≈3 por sí mismo.
+138. La fila del campo magnético, con un JSON sin prueba de dirección, dice «JSON de una
+     versión anterior de la app: repite el análisis».

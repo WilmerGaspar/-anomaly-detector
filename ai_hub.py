@@ -21,15 +21,23 @@ import time
 import unicodedata
 
 PROVIDERS = [
+    # Modelo y opción de pensamiento tomados del ejemplo oficial de build.nvidia.com (10-oct-2026).
+    # Sin pensamiento: responde antes y no gasta los tokens razonando (las respuestas son cortas y
+    # se comprueban contra los datos). El razonamiento, si llega, viene aparte en reasoning_content.
     {"id": "nvidia", "name": "NVIDIA", "base_url": "https://integrate.api.nvidia.com/v1",
-     "key": "NVIDIA_API_KEY", "model_key": "NVIDIA_MODEL", "default_model": "nvidia/nemotron-3-super-120b-a12b",
-     "signup": "https://build.nvidia.com"},
+     "key": "NVIDIA_API_KEY", "model_key": "NVIDIA_MODEL", "default_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+     "signup": "https://build.nvidia.com", "extra": {"chat_template_kwargs": {"enable_thinking": False}}},
     {"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1",
      "key": "GROQ_API_KEY", "model_key": "GROQ_MODEL", "default_model": "openai/gpt-oss-120b",
      "signup": "https://console.groq.com", "extra": {"reasoning_effort": "low"}},
     {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
      "key": "OPENROUTER_API_KEY", "model_key": "OPENROUTER_MODEL", "default_model": "openai/gpt-oss-120b:free",
      "signup": "https://openrouter.ai"},
+    # DeepSeek-R1 (MIT, 671B parámetros, 37B activos): no cabe en Streamlit Cloud, se usa gratis por
+    # OpenRouter con la MISMA clave OPENROUTER_API_KEY. Es un modelo de razonamiento: ver REASONING.
+    {"id": "deepseek", "name": "DeepSeek R1", "base_url": "https://openrouter.ai/api/v1",
+     "key": "OPENROUTER_API_KEY", "model_key": "DEEPSEEK_MODEL", "default_model": "deepseek/deepseek-r1-0528:free",
+     "signup": "https://openrouter.ai/deepseek/deepseek-r1-0528:free", "reasoning": True},
     {"id": "gemini", "name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
      "key": "GEMINI_API_KEY", "model_key": "GEMINI_MODEL", "default_model": "gemini-3.5-flash",
      "signup": "https://aistudio.google.com", "extra": {"reasoning_effort": "low"}},
@@ -74,6 +82,27 @@ def _error_text(code, body=""):
     return "respuesta inesperada (%s) %s" % (code, body)
 
 
+# Modelos de razonamiento tipo DeepSeek-R1. Recomendaciones de su repositorio: temperatura 0.5-0.7
+# (0.6; con valores bajos se repite sin fin) y sin mensaje de sistema (todo en el mensaje del
+# usuario). Piensan antes de responder: más tokens y más tiempo de espera.
+REASONING = {"temperature": 0.6, "min_tokens": 6000, "timeout": 150}
+
+
+def is_reasoning(provider):
+    return bool(provider.get("reasoning")) or "deepseek-r1" in str(provider.get("model", "")).lower()
+
+
+def _as_user_only(messages):
+    """Sin mensaje de sistema: sus instrucciones van delante del primer mensaje del usuario."""
+    system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
+    rest = [dict(m) for m in messages if m.get("role") != "system"]
+    if system and rest and rest[0].get("role") == "user":
+        rest[0]["content"] = system + "\n\n" + rest[0]["content"]
+    elif system:
+        rest.insert(0, {"role": "user", "content": system})
+    return rest
+
+
 def chat(provider, messages, max_tokens=1200, timeout=60, post=None):
     """Una petición de chat. Devuelve dict(ok, text, detail, latency_ms)."""
     if post is None:
@@ -82,7 +111,14 @@ def chat(provider, messages, max_tokens=1200, timeout=60, post=None):
     if not provider.get("api_key"):
         return {"ok": False, "text": "", "detail": "sin clave", "latency_ms": None}
     url = provider["base_url"].rstrip("/") + "/chat/completions"
-    payload = {"model": provider["model"], "messages": messages, "max_tokens": int(max_tokens), "temperature": 0.2}
+    temperature = 0.2
+    if is_reasoning(provider):
+        messages = _as_user_only(messages)
+        temperature = REASONING["temperature"]
+        if max_tokens > 64:                      # la prueba de conexión sigue siendo mínima
+            max_tokens = max(int(max_tokens), REASONING["min_tokens"])
+            timeout = max(timeout, REASONING["timeout"])
+    payload = {"model": provider["model"], "messages": messages, "max_tokens": int(max_tokens), "temperature": temperature}
     # Razonamiento corto (más rápido y deja tokens para la respuesta), solo con el modelo por
     # defecto: otro modelo puesto en Secrets podría no aceptar la opción.
     extra = provider.get("extra") if provider["model"] == provider.get("default_model") else None

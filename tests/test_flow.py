@@ -121,9 +121,10 @@ class _Resp:
 
 
 def test_welcome_window_orders_and_queue_end_to_end(monkeypatch, fake_mast):  # noqa: F811
-    """Al entrar con una IA 🟢: ventana «¿Listo para trabajar?» → «Sí» → las IA revisan el flujo y proponen
-    órdenes (lista cerrada, verificadas) → la persona marca y ejecuta → la cola busca, carga y analiza → al
-    terminar, las IA vuelven a revisar el flujo con el resultado."""
+    """Al entrar con una IA 🟢 y sin imagen: ventana «¿Listo para trabajar?» → «Sí» EMPIEZA A TRABAJAR (busca,
+    carga y analiza) → el resultado se ve en «Órdenes de trabajo» → las IA revisan el flujo con el resultado y
+    proponen órdenes (lista cerrada, verificadas) → la persona marca una y la ejecuta → nueva revisión.
+    Caso real (captura del 10-oct-2026): «Sí» solo revisaba y, sin imagen, no salía ningún resultado."""
     for k in ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-SECRETO-7")
@@ -132,31 +133,45 @@ def test_welcome_window_orders_and_queue_end_to_end(monkeypatch, fake_mast):  # 
     def post(url, headers=None, json=None, timeout=None, **kw):
         if json["max_tokens"] <= 16:
             return _Resp("OK")
-        q = json["messages"][-1]["content"].split("PREGUNTA: ", 1)[1]
-        asked.append(q)
-        assert "REVISION_FLUJO" in json["messages"][-1]["content"]
-        return _Resp("**Qué muestra:** aún no hay imagen [REVISION_FLUJO].\n**Siguiente prueba:** cargar una.\n"
-                     "ACCIÓN: hazlo_por_mi\nORDEN: hazlo_por_mi — falta el archivo [REVISION_FLUJO]")
+        content = json["messages"][-1]["content"]
+        asked.append(content.split("PREGUNTA: ", 1)[1])
+        assert "REVISION_FLUJO" in content and '"ANALISIS"' in content          # revisa con el resultado
+        return _Resp("**Qué muestra:** p en el mínimo posible [prueba_frente_al_nulo].\n**Siguiente prueba:** más "
+                     "subrogados.\nACCIÓN: mas_subrogados\nORDEN: mas_subrogados — afinar p [prueba_frente_al_nulo]")
 
     monkeypatch.setattr(requests, "post", post)
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=600)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("¿Listo para trabajar?" in str(m.value) for m in at.markdown) and not asked   # saludo sin gastar consultas
-    next(b for b in at.button if b.key == "ai_welcome_yes").click().run()
-    at.run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert asked == [H.REVIEW_QUESTION]
-    pick = next(c for c in at.checkbox if c.key == "order_pick_auto")
-    assert pick.value is True and "🤖 1 IA" in pick.label and "🧠 regla" in pick.label
-    next(b for b in at.button if b.key == "orders_run").click().run()
-    for _ in range(8):
-        if len(asked) >= 2:
-            break
-        at.run()
+    yes = next(b for b in at.button if b.key == "ai_welcome_yes")
+    assert "busca, carga y analiza JWST · NGC 7023" in yes.label and not asked      # saludar no gasta consultas
+    yes.click().run()
+
+    def until(cond, n=8):
+        for _ in range(n):
+            if cond():
+                return
+            at.run()
+
+    until(lambda: asked)
     assert not at.exception, [e.value for e in at.exception]
     assert fake_mast["download"] == ["mast:ok"] and len(at.session_state["guide_log"]) == 1
     assert at.session_state["order_log"][0].startswith("✔ Hazlo por mí")
-    assert len(asked) == 2                                     # al terminar, otra revisión con el resultado
+    assert asked == [H.REVIEW_QUESTION]                                          # revisión con el resultado
+    assert any("📊 **Resultado actual:** jw_prueba_i2d.fits · F200W" in str(m.value) for m in at.markdown)
+    picks = {c.key.rsplit("_", 1)[0]: c for c in at.checkbox if (c.key or "").startswith("order_pick_")}
+    pick = picks["order_pick_more_null"]
+    assert pick.value is True and "🤖 1 IA" in pick.label
+    # Lo que las IA no votaron (aquí el control conocido, que solo propone la regla) sale sin marcar.
+    assert picks["order_pick_known_control"].value is False and "🧠 regla" in picks["order_pick_known_control"].label
+    for k, c in picks.items():                                                   # solo esa orden
+        if k != "order_pick_more_null":
+            c.uncheck()
+    next(b for b in at.button if b.key == "orders_run").click().run()
+    until(lambda: len(asked) >= 2)
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["n_null"] == 199 and at.session_state["analysis_count"] == 2
+    assert at.session_state["order_log"] == ["✔ Repetir con más subrogados (p más preciso)"]
+    assert len(asked) == 2                                                       # y otra revisión al terminar
     assert "SECRETO" not in " ".join(str(m.value) for m in at.markdown)

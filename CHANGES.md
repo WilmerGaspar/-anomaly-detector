@@ -1074,3 +1074,25 @@ Petición: al conectar la IA, que aparezca una ventana preguntando si estás lis
      - el contexto con REVISION_FLUJO;
      - de punta a punta en la app real: ventana → «Sí» → órdenes → ejecutar → buscar, cargar y analizar →
        nueva revisión.
+
+## «Sí» empieza a trabajar y el resultado se ve en la ventana de órdenes
+
+Caso real (captura del 10-oct-2026): con «Sí» las IA revisaban el flujo, pero sin imagen cargada solo podían
+decir «hay que cargar un archivo». Las órdenes quedaban arriba esperando un clic y no salía ningún resultado.
+
+181. **Sin imagen, «✅ Sí: busca, carga y analiza JWST · NGC 7023» trabaja directamente**: pone «Hazlo por mí» en
+     la cola. Al terminar, las IA revisan el flujo **con el resultado** y proponen las órdenes siguientes. Con un
+     resultado ya hecho, «Sí» sigue pidiendo la revisión. En la primera carga se usa el objeto por defecto del
+     selector (antes quedaba vacío y no se ofrecía buscar).
+182. **«📋 Órdenes de trabajo» va debajo de la respuesta de las IA**, y la consola avisa «👇 Elige las órdenes
+     justo debajo».
+     - Arriba de la ventana: **📊 Resultado actual** (archivo, filtro, semáforo, p y β, sacados del JSON y no de
+       la IA) con el enlace «ver las pestañas».
+     - Mientras trabaja: «⏳ Trabajando…» con lo que tarda y dónde saldrá.
+     - Si una orden no da resultado, su línea dice por qué (la última nota de la guía).
+183. Las casillas de las órdenes se reinician con cada propuesta de las IA. Antes, una orden con 2 votos salía
+     sin marcar porque la casilla existía desde antes de los votos.
+184. Test de punta a punta actualizado:
+     - «Sí» → busca, carga y analiza → resultado a la vista → revisión con IA → marcar «más subrogados» →
+       ejecutar → n = 199 y segundo análisis → nueva revisión;
+     - lo que las IA no votaron sale sin marcar.

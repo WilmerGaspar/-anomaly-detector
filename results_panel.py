@@ -278,10 +278,12 @@ def _discovery_card(R):
     from guide import references_from_log
     refs += references_from_log(st.session_state.get("guide_log"), R.get("key") or ())
     g = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"), references=refs or None)
-    colors = {"invalid": "#5a1a1a", "none": "#1a1f1b", "unconfirmed": "#4a3210", "explained": "#3d3a10",
-              "robust": "#0f3d1c", "pioneer": "#2e1747"}
+    # Cuadro de aviso al estilo Windows 2000: fondo claro del color del nivel, texto negro, borde en relieve.
+    colors = {"invalid": "#f4cccc", "none": "#ecebe8", "unconfirmed": "#fde3c0", "explained": "#fff4c2",
+              "robust": "#d5f0d8", "pioneer": "#e5d6f5"}
     st.markdown(
-        "<div style='background:%s;border:1px solid #33ff66;padding:0.8rem 1rem;margin:0.4rem 0 0.8rem 0'>"
+        "<div style='background:%s;color:#000;border:1px solid;border-color:#fff #404040 #404040 #fff;"
+        "box-shadow:inset -1px -1px #808080;padding:0.8rem 1rem;margin:0.4rem 0 0.8rem 0'>"
         "<div style='font-size:1.4rem'>%s <b>%s</b></div><div>%s</div></div>"
         % (colors[g["level"]], g["icon"], g["title"], g["meaning"]), unsafe_allow_html=True)
     with st.expander("Comprobaciones de la alerta (%d de %d superadas)" % (sum(c["ok"] for c in g["checks"]), len(g["checks"])),

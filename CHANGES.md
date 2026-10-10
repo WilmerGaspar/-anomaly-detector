@@ -993,3 +993,43 @@ de parámetros, frente a 120.000 millones de gpt-oss en Groq). Ese modelo se inv
 168. **Se pasa al siguiente gratis** también con un 403 (p. ej. «solo para agentes») y con un 429 «upstream»
      (proveedor saturado). Con el límite diario de la cuenta no se cambia, porque vale para todos.
 169. Tests: tamaño por nombre y por descripción, orden de elección, cuándo probar el siguiente y app real.
+
+## 🖥️ Aspecto Windows 2000, con una consola futurista para las IA
+
+Petición: cambiar todo el aspecto a Windows 2000 y hacer más futurista la ventana de las IA. Antes de
+avanzar se envió una maqueta y se eligió «Windows 2000 completo».
+
+170. **Tema nuevo (`theme.py`, `.streamlit/config.toml`)**:
+     - Escritorio azul profundo con una cuadrícula tenue.
+     - La app es una ventana gris en relieve con barra de título azul y los botones de minimizar,
+       maximizar y cerrar (solo adorno).
+     - Cada sección («🧠 Guía», «1. Fuente de datos»…) empieza con su barra azul.
+     - Botones en relieve que se hunden al pulsar, campos blancos hundidos, pestañas como fichas y grupos
+       con borde.
+     - Barra lateral con una banda azul vertical, como un menú de Inicio.
+     - El cuadro del semáforo del resultado pasa a colores claros con texto negro, para que se lea sobre gris.
+     - Los gráficos siguen oscuros, como pantallas dentro de la ventana.
+     - Solo cambia el aspecto, no ningún cálculo. Sin logotipos ni marcas, y nada se carga de fuera (los
+       botones de la barra son un SVG dentro del CSS).
+171. **Barra de tareas fija abajo**:
+     - «Inicio» sube a la guía.
+     - Hay accesos solo a las secciones que están en pantalla: sin archivo cargado, «2. Región» y
+       «4. Analizar» no aparecen.
+     - En la bandeja está el semáforo de cada IA con clave.
+     - En el móvil se ocultan los accesos y queda la bandeja.
+172. **Ventana «Consejo de IA — consola de interpretación»**: por fuera es Windows 2000; por dentro, una
+     consola oscura con brillo cian y líneas de pantalla.
+     - Un módulo por IA con su luz (🟢, 🔴, 💤 o sin clave), el modelo, el tiempo y si su respuesta pasó la
+       comprobación.
+     - Mientras piensan, una barra de progreso de cuadritos.
+     - En cada respuesta, **cada dato citado se marca**: ✓ verde si existe en tus datos, ✗ rojo tachado si
+       se lo inventó (caso real: `[mision_JWST]`).
+     - Una fila con las cuatro comprobaciones (números, referencias, datos citados, sin afirmar de más) y
+       una barra del consenso.
+     - El texto de las IA se escapa: nunca entra como HTML ni carga imágenes.
+173. Pestañas de resultados como fichas de propiedades (Streamlit 1.64: `stTab`, `aria-selected`); se pide `streamlit>=1.64.0`, la versión probada.
+174. Tests (`tests/test_theme.py`):
+     - el texto de las IA se escapa y las citas se marcan ✓/✗;
+     - la fila de comprobaciones sigue al verificador;
+     - cada acceso de la barra de tareas tiene su sección;
+     - el tema no carga nada de fuera.

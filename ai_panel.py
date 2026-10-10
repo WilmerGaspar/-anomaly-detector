@@ -9,12 +9,15 @@ Claves: se pueden pegar en la app (solo viven en esta sesión del navegador: no 
 muestran) o dejarlas fijas en Streamlit → Settings → Secrets. Las IA no ejecutan nada: proponen
 una acción y la persona la acepta.
 """
+import html
 import os
+import re
 import time
 
 import streamlit as st
 
 import ai_hub as H
+import theme
 
 ACTION_LABELS = {"auto": "▶ Hazlo por mí (buscar, cargar y analizar)", "auto_analyze": "▶ Analizar por mí",
                  "other_filter": "▶ Otro archivo del mismo objeto"}
@@ -40,13 +43,7 @@ SECRETS_STEPS = (
     "salen 🔴 con «data policy»."
 )
 
-CSS = """<style>
-.ai-chip{display:inline-block;padding:0.1rem 0.55rem;margin:0.12rem 0.2rem 0.12rem 0;border:1px solid #2a5a35;
- border-radius:999px;font-size:0.82rem;white-space:nowrap}
-.ai-chip.on{border-color:#33ff66;color:#33ff66}.ai-chip.err{border-color:#ff6b6b;color:#ff9b9b}
-.ai-chip.wait{border-color:#ffb347;color:#ffcf8a}.ai-chip.off{border-color:#3b4a40;color:#8a9a8f}
-.ai-head{font-size:0.85rem;color:#8fd9a0}.ai-ok{color:#33ff66}.ai-warn{color:#ffb347}
-</style>"""
+# Estilos (chips, consola, tarjetas): en theme.py, con el resto del aspecto.
 
 
 # ---------------------------------------------------------------- claves
@@ -157,13 +154,13 @@ def _error_lines(providers, status):
 def render_controls(question, card, step, log, gate):
     """Semáforo, claves y preguntas. Una pregunta queda pendiente y la responde `render_council`."""
     ss = st.session_state
-    st.markdown(CSS, unsafe_allow_html=True)
     providers = H.configured(get_secret)
     keyed = [p for p in providers if p["api_key"]]
     st.markdown("**🤖 IA conectadas**")
     if ss.get("ai_flash"):
         st.success(ss.pop("ai_flash"))
     status = _status(providers, force=st.session_state.pop("ai_force_ping", False))
+    ss["ai_tray"] = [(H.LIGHT[status.get(p["id"], {}).get("state", H.NO_KEY)], p["name"]) for p in keyed]
     _chips(providers, status)
     _error_lines(providers, status)
     with st.expander("🔑 Conectar una IA (pegar la clave)", expanded=not keyed):
@@ -211,34 +208,92 @@ def render_controls(question, card, step, log, gate):
 
 
 # ---------------------------------------------------------------- consejo (a lo ancho)
+# Ventana «Consejo de IA»: marco Windows 2000 y, dentro, una consola oscura con un módulo y una luz por IA,
+# barra de progreso de cuadritos mientras piensan, cada dato citado marcado ✓/✗ y la barra del consenso.
+
+LED = {H.CONNECTED: "on", H.ERROR: "err", H.UNTESTED: "wait", H.NO_KEY: "", H.RESTING: "zz"}
+
+
+def _short(model):
+    """«google/gemma-4-31b-it:free» → «gemma-4-31b-it» (el nombre completo sigue en «Detalle»)."""
+    return str(model or "").split("/")[-1].split(":")[0]
+
 
 def _readable(text):
     """Cada apartado («**Qué muestra:**»…) en su párrafo y los saltos de línea respetados."""
-    import re
     text = re.sub(r"\s*(\*\*(?:Qué|Siguiente)[^*]{0,40}:\*\*)", r"\n\n\1", str(text or "")).strip()
     return re.sub(r"(?<!\n)\n(?!\n)", "  \n", text)
 
 
-def _answer_card(r):
-    with st.container(border=True):
-        model = r.get("model") or ""
-        if r.get("served_model") and r["served_model"] != model:
-            model += " → " + r["served_model"]                # qué modelo gratis eligió openrouter/free
+def _answer_html(text, known):
+    """Texto de la IA sin HTML propio (se escapa: es texto de fuera) y con cada dato citado marcado:
+    ✓ si existe en tus datos, ✗ tachado si no. Las imágenes no se cargan."""
+    esc = html.escape(str(text or ""), quote=False).replace("![", "!​[")
+
+    def mark(m):
+        ok = H.cite_ok(m.group(1), known)
+        return '<span class="cite %s">%s %s</span>' % ("ok" if ok else "bad", m.group(1), "✓" if ok else "✗")
+    return _readable(H._CITE.sub(mark, esc))
+
+
+CHECKS = (("números", "cita números"), ("referencias", "cita referencias"), ("datos citados", "cita datos"),
+          ("sin afirmar de más", "afirma de más"))
+
+
+def _checks_html(issues):
+    out = []
+    for label, prefix in CHECKS:
+        bad = any(i.startswith(prefix) for i in issues)
+        out.append('<span class="%s">%s %s</span>' % ("n" if bad else "y", "✗" if bad else "✓", label))
+    return '<div class="hud-checks">%s</div>' % "".join(out)
+
+
+def _answer_card(r, known=None, key=""):
+    with st.container(key="aicard_%s_%s" % (key, r["id"])):
+        model = _short(r.get("model"))
+        if r.get("served_model") and _short(r["served_model"]) != model:
+            model += " → " + _short(r["served_model"])          # qué modelo gratis eligió el enrutador
         meta = " · ".join(x for x in (model, ("%.1f s" % (r["latency_ms"] / 1000.0))
                                       if r.get("latency_ms") else "") if x)
         if not r["ok"]:
-            st.markdown("🔴 **%s** <span class='ai-head'>%s</span>" % (r["name"], meta), unsafe_allow_html=True)
+            st.markdown("<div class='hud-head'>🔴 ▌ %s <span class='m'>%s</span></div>"
+                        % (html.escape(r["name"].upper()), html.escape(meta)), unsafe_allow_html=True)
             st.caption(r["detail"])
             return
         badge = ("<span class='ai-ok'>✅ pasa la comprobación</span>" if not r["issues"]
                  else "<span class='ai-warn'>⚠️ revísala</span>")
-        st.markdown("🤖 **%s** · %s<br><span class='ai-head'>%s</span>" % (r["name"], badge, meta),
-                    unsafe_allow_html=True)
-        st.markdown(_readable(r["text"]) or "_(sin texto)_")
+        st.markdown("<div class='hud-head'>🤖 ▌ %s · %s<br><span class='m'>%s</span></div>"
+                    % (html.escape(r["name"].upper()), badge, html.escape(meta)), unsafe_allow_html=True)
+        st.markdown(_answer_html(r["text"], known) or "_(sin texto)_", unsafe_allow_html=True)
+        st.markdown(_checks_html(r["issues"]), unsafe_allow_html=True)
         if r["issues"]:
             st.caption("⚠️ " + "; ".join(r["issues"]))
         if r["action"]:
             st.caption("Propone: " + ACTION_LABELS[r["action"]])
+
+
+def _modules(providers, status, results=()):
+    """Un módulo por IA con su luz: modelo, tiempo y si su última respuesta pasó la comprobación."""
+    by = {r["id"]: r for r in results}
+    cells = []
+    for p in providers:
+        s = status.get(p["id"], {})
+        state = s.get("state", H.NO_KEY)
+        r = by.get(p["id"])
+        if state == H.NO_KEY:
+            sub = "sin clave"
+        elif state == H.RESTING:
+            sub = "💤 sin modelo gratis hoy"
+        elif r and r["ok"]:
+            sub = "%s · %.1f s · %s" % (_short(r.get("served_model") or r.get("model")), (r["latency_ms"] or 0) / 1000.0,
+                                       "✓ verificada" if not r["issues"] else "⚠ revisar")
+        elif r:
+            sub = "sin respuesta"
+        else:
+            sub = "%s · %s" % (_short(s.get("model") or p["model"]), H.STATE_TEXT[state])
+        cells.append('<div class="hud-mod"><span class="led %s"></span><b>%s</b><small>%s</small></div>'
+                     % (LED[state], html.escape(p["name"]), html.escape(sub)))
+    st.markdown('<div class="hud-mods">%s</div>' % "".join(cells), unsafe_allow_html=True)
 
 
 def _consensus(results, actions, current, on_action, key):
@@ -248,6 +303,9 @@ def _consensus(results, actions, current, on_action, key):
     st.markdown("🧭 **Consenso:** respondieron %d de %d IA · %d %s la comprobación%s"
                 % (len(ok), len(results), len(verified), "pasa" if len(verified) == 1 else "pasan",
                    (" · proponen %s (%d)" % (ACTION_LABELS[action], votes)) if action else ""))
+    st.markdown('<div class="hud-cons"><div class="bar"><i style="width:%d%%"></i></div><span>%d de %d ✓</span></div>'
+                % (round(100.0 * len(verified) / max(1, len(results))), len(verified), len(results)),
+                unsafe_allow_html=True)
     if not current:
         st.caption("Estas respuestas son sobre un paso anterior: vuelve a preguntar para actualizarlas.")
     elif action and action in actions:
@@ -258,11 +316,17 @@ def _consensus(results, actions, current, on_action, key):
         st.caption("Las IA no proponen ninguna acción disponible ahora.")
 
 
-def _grid(results, n_cols=2):
+def _grid(results, known=None, key="", n_cols=2):
     cols = st.columns(min(n_cols, max(1, len(results))))
     for i, r in enumerate(results):
         with cols[i % len(cols)]:
-            _answer_card(r)
+            _answer_card(r, known, key)
+
+
+def _thinking(p):
+    return ('<div class="hud-mod"><span class="led wait"></span><b>%s</b> pensando…%s'
+            '<div class="hud-prog run"><span></span></div></div>'
+            % (html.escape(p["name"]), " <small>(razona antes: puede tardar)</small>" if H.is_reasoning(p) else ""))
 
 
 def render_council(step, on_action):
@@ -273,39 +337,56 @@ def render_council(step, on_action):
     actions = tuple(step.get("actions") or ())
     context = ss.get("ai_context_now")
     history = ss.setdefault("ai_history", [])
-    if pending:
-        active = [p for p in providers if H.usable(p)]
-        st.markdown("#### 🤖 Consejo de IA · «%s»" % pending["q"])
-        cols = st.columns(min(2, max(1, len(active))))
-        slots = {p["id"]: cols[i % len(cols)].empty() for i, p in enumerate(active)}
-        for p in active:
-            slots[p["id"]].info("⏳ %s está pensando…%s" % (p["name"], " (razona antes: puede tardar)"
-                                                          if H.is_reasoning(p) else ""))
-        results = []
-        for r in H.ask_iter(providers, pending["q"], pending["ctx"]):
-            results.append(r)
-            with slots[r["id"]].container():
-                _answer_card(r)
-        order = {p["id"]: i for i, p in enumerate(providers)}
-        results.sort(key=lambda r: order[r["id"]])
-        history.insert(0, {"q": pending["q"], "ctx": pending["ctx"], "results": results,
-                           "time": time.strftime("%H:%M")})
-        del history[MAX_HISTORY:]
-        cur = ss.get("ai_status") or {"fp": H.fingerprint(providers), "by_id": H.initial_status(providers)}
-        ss["ai_status"] = {"fp": cur["fp"], "by_id": H.status_after_answers(cur["by_id"], results)}
-        st.rerun()                                     # semáforo y consenso con todo ya llegado
-    if not history:
+    status = (ss.get("ai_status") or {}).get("by_id") or H.initial_status(providers)
+    if not pending and not history:
         return
-    latest = history[0]
-    st.markdown("#### 🤖 Consejo de IA · «%s» · %s" % (latest["q"], latest["time"]))
-    _consensus(latest["results"], actions, latest["ctx"] == context, on_action, key="ai_do")
-    _grid(latest["results"])
-    st.caption("IA externas: pueden equivocarse. El semáforo, los números y la tabla de hipótesis los calcula la app. "
-               "Cada respuesta se comprueba: cifras que no están en los datos, referencias inventadas, datos citados "
-               "que no existen y afirmaciones de más (✅/⚠️). Solo las ✅ votan la acción.")
-    for i, h in enumerate(history[1:], 1):
-        n_ok = sum(1 for r in h["results"] if r["ok"] and not r["issues"])
-        with st.expander("Antes · %s · «%s» · %d ✅" % (h["time"], h["q"], n_ok)):
-            if h["ctx"] != context:
-                st.caption("Sobre un paso anterior del análisis.")
-            _grid(h["results"])
+    with st.container(key="win_ai"):
+        theme.window_title("Consejo de IA — consola de interpretación", "🤖",
+                           "trabajando…" if pending else "listo · %s" % history[0]["time"])
+        with st.container(key="ai_console"):
+            if pending:
+                _council_live(pending, providers, status, ss, history)       # termina con st.rerun()
+            latest = history[0]
+            _modules(providers, status, latest["results"])
+            n_ok = sum(1 for r in latest["results"] if r["ok"])
+            st.markdown('<div class="hud-line">&gt; «%s» · %s · %d de %d IA respondieron</div>'
+                        '<div class="hud-prog"><span style="--fill:%d%%"></span></div>'
+                        % (html.escape(latest["q"]), latest["time"], n_ok, len(latest["results"]),
+                           round(100.0 * n_ok / max(1, len(latest["results"])))), unsafe_allow_html=True)
+            known = H.known_names(latest["ctx"])
+            _grid(latest["results"], known, key="h0")
+            _consensus(latest["results"], actions, latest["ctx"] == context, on_action, key="ai_do")
+            st.caption("IA externas: pueden equivocarse. El semáforo, los números y la tabla de hipótesis los calcula la "
+                       "app. Cada respuesta se comprueba: cifras que no están en los datos, referencias inventadas, datos "
+                       "citados que no existen (✗ tachados) y afirmaciones de más (✅/⚠️). Solo las ✅ votan la acción.")
+            for i, h in enumerate(history[1:], 1):
+                n_good = sum(1 for r in h["results"] if r["ok"] and not r["issues"])
+                with st.expander("Antes · %s · «%s» · %d ✅" % (h["time"], h["q"], n_good)):
+                    if h["ctx"] != context:
+                        st.caption("Sobre un paso anterior del análisis.")
+                    _grid(h["results"], H.known_names(h["ctx"]), key="h%d" % i)
+
+
+def _council_live(pending, providers, status, ss, history):
+    """Pregunta en curso: módulos, barra de progreso por IA y cada respuesta en cuanto llega."""
+    active = [p for p in providers if H.usable(p)]
+    _modules(providers, status)
+    st.markdown('<div class="hud-line">&gt; «%s» · leyendo tu análisis… (%d IA)</div>'
+                % (html.escape(pending["q"]), len(active)), unsafe_allow_html=True)
+    cols = st.columns(min(2, max(1, len(active))))
+    slots = {p["id"]: cols[i % len(cols)].empty() for i, p in enumerate(active)}
+    for p in active:
+        slots[p["id"]].markdown(_thinking(p), unsafe_allow_html=True)
+    known = H.known_names(pending["ctx"])
+    results = []
+    for r in H.ask_iter(providers, pending["q"], pending["ctx"]):
+        results.append(r)
+        with slots[r["id"]].container():
+            _answer_card(r, known, key="live")
+    order = {p["id"]: i for i, p in enumerate(providers)}
+    results.sort(key=lambda r: order[r["id"]])
+    history.insert(0, {"q": pending["q"], "ctx": pending["ctx"], "results": results, "time": time.strftime("%H:%M")})
+    del history[MAX_HISTORY:]
+    cur = ss.get("ai_status") or {"fp": H.fingerprint(providers), "by_id": H.initial_status(providers)}
+    ss["ai_status"] = {"fp": cur["fp"], "by_id": H.status_after_answers(cur["by_id"], results)}
+    st.rerun()                                         # semáforo y consenso con todo ya llegado

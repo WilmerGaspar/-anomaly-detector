@@ -670,6 +670,20 @@ def _numbers(text):
     return out
 
 
+def known_names(allowed_text):
+    """Nombres de datos que se pueden citar (normalizados), del JSON de la primera línea; None si no hay JSON."""
+    try:
+        return ({_norm(k) for k in _paths(json.loads(allowed_text.split("\n", 1)[0]))}
+                if str(allowed_text).lstrip().startswith("{") else None)
+    except ValueError:
+        return None
+
+
+def cite_ok(name, known):
+    """¿Existe en los datos el dato citado entre corchetes? (sin datos con los que comparar: sí)."""
+    return known is None or _norm(str(name).strip()) in known
+
+
 def verify(answer, allowed_text):
     """Problemas de una respuesta: números que no salen de los datos (o de la pregunta) y
     afirmaciones de más. Enteros pequeños (0-10) se permiten: enumeraciones y conteos."""
@@ -693,12 +707,8 @@ def verify(answer, allowed_text):
     refs = [m.group(1) for m in _REF.finditer(str(answer)) if _norm(m.group(1)) not in allowed_norm]
     if refs:
         issues.append("cita referencias que no están en tus datos: %s" % ", ".join(sorted(set(refs))[:3]))
-    try:
-        known = _paths(json.loads(allowed_text.split("\n", 1)[0])) if allowed_text.lstrip().startswith("{") else None
-    except ValueError:
-        known = None
-    if known is not None:
-        known_norm = {_norm(k) for k in known}
+    known_norm = known_names(allowed_text)
+    if known_norm is not None:
         bad_cites = [c for c in _CITE.findall(str(answer)) if _norm(c.strip()) not in known_norm]
         if bad_cites:
             issues.append("cita datos que no existen: %s" % ", ".join("[%s]" % c for c in sorted(set(bad_cites))[:3]))

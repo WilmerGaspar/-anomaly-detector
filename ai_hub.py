@@ -55,7 +55,8 @@ LIGHT = {NO_KEY: "⚪", UNTESTED: "🟡", CONNECTED: "🟢", ERROR: "🔴", REST
 STATE_TEXT = {NO_KEY: "sin clave", UNTESTED: "clave puesta, sin probar", CONNECTED: "conectada", ERROR: "error",
               RESTING: "en pausa: sin modelo gratis hoy"}
 
-ACTIONS = {"hazlo_por_mi": "auto", "otro_archivo": "other_filter", "analizar": "auto_analyze"}
+ACTIONS = {"hazlo_por_mi": "auto", "otro_archivo": "other_filter", "analizar": "auto_analyze",
+           "mas_subrogados": "more_null", "control_conocido": "known_control"}
 
 
 # ---------------------------------------------------------------- configuración
@@ -463,10 +464,11 @@ def _result(p, a, question, context):
     if a["ok"] and not a["text"]:
         # HTTP 200 sin texto: el modelo gastó los tokens razonando y no llegó a responder.
         a = dict(a, ok=False, detail="respuesta vacía (el modelo no terminó de responder)")
-    text, action = split_action(a["text"]) if a["ok"] else ("", None)
+    text, orders = split_orders(a["text"]) if a["ok"] else ("", [])
+    text, action = split_action(text) if a["ok"] else ("", None)
     issues = verify(text, context + "\n" + question) if a["ok"] else []
     return {"id": p["id"], "name": p["name"], "model": a.get("model") or p["model"], "ok": a["ok"], "text": text,
-            "action": action, "issues": issues, "detail": a["detail"], "latency_ms": a["latency_ms"],
+            "action": action, "orders": orders, "issues": issues, "detail": a["detail"], "latency_ms": a["latency_ms"],
             "served_model": a.get("served_model")}
 
 
@@ -568,13 +570,17 @@ def _hot_tiles(card, n=3):
     return out
 
 
-def build_context(card, log=None, step=None, actions=(), gate=None):
+def build_context(card, log=None, step=None, actions=(), gate=None, flow=None):
     """Resumen compacto (JSON) de lo que la IA puede usar. Nada más sale de la app.
     `gate`: semáforo que muestra la app ahora (con la bitácora como referencia puede pasar de
-    🟢 a 🟣); si no se da, el del JSON."""
+    🟢 a 🟣); si no se da, el del JSON. `flow`: revisión del flujo por reglas (flow.review)."""
     ctx = {"ACCIONES_DISPONIBLES": ["ninguna"] + [k for k, v in ACTIONS.items() if v in actions]}
     if step:
         ctx["PASO_ACTUAL"] = {"titulo": step.get("title"), "texto": step.get("text"), "pasos": step.get("steps")}
+    if flow:
+        back = {v: k for k, v in ACTIONS.items()}
+        ctx["REVISION_FLUJO"] = [{"paso": it["paso"], "estado": it["estado"], "detalle": it["detalle"],
+                                  "orden": back.get(it.get("orden"))} for it in flow]
     if card:
         src, gate = card.get("source") or {}, gate or card.get("discovery_gate") or {}
         st_ = card.get("structure_test") or {}
@@ -715,6 +721,31 @@ def verify(answer, allowed_text):
     return issues
 
 
+# Pregunta de la ventana «¿Listo para trabajar?» y del botón «Revisar el flujo con IA».
+REVIEW_QUESTION = (
+    "Revisa el flujo de trabajo como un revisor exigente: usa REVISION_FLUJO (comprobaciones hechas por la app con "
+    "reglas fijas) y el ANALISIS. Di qué está bien, qué falta o falla y en qué orden conviene seguir. Al final, además "
+    "de la línea «ACCIÓN:», escribe hasta 3 líneas «ORDEN: clave — motivo [dato]», con claves de "
+    "ACCIONES_DISPONIBLES, de la más importante a la menos.")
+
+_ORDER_LINE = re.compile(r"\s*\**\s*orden\s*\**\s*:\s*\**\s*([a-z_áéíóú]+)\**\s*(?:[—–:|-]+\s*(.*))?$", re.I)
+
+
+def split_orders(text):
+    """Separa las líneas «ORDEN: clave — motivo». Devuelve (texto, [(acción de la guía, motivo)]); solo
+    claves de la lista cerrada, sin repetir, como mucho 3."""
+    orders, keep = [], []
+    for line in str(text).splitlines():
+        m = _ORDER_LINE.match(line)
+        if m:
+            a = ACTIONS.get(_norm(m.group(1)).strip())
+            if a and a not in [o for o, _ in orders] and len(orders) < 3:
+                orders.append((a, (m.group(2) or "").strip()))
+            continue
+        keep.append(line)
+    return "\n".join(keep).strip(), orders
+
+
 def split_action(text):
     """Separa la línea «ACCIÓN: X» del texto. Devuelve (texto, clave de acción de la guía o None)."""
     action = None
@@ -746,3 +777,21 @@ def consensus(results):
         return None, 0, len([r for r in results if r["ok"]])
     best = max(set(votes), key=votes.count)
     return best, votes.count(best), len([r for r in results if r["ok"]])
+
+
+def consensus_orders(results):
+    """Órdenes propuestas por las IA: {acción: {"votes", "by", "reasons"}}. Solo votan las respuestas que
+    pasan la comprobación y el mismo modelo vota una vez; las demás se ven, marcadas, pero no cuentan."""
+    out, seen = {}, {}
+    for r in results:
+        if not r.get("ok"):
+            continue
+        for a, why in (r.get("orders") or ([(r["action"], "")] if r.get("action") else [])):
+            o = out.setdefault(a, {"votes": 0, "by": [], "reasons": []})
+            o["reasons"].append((r["name"], why, not r["issues"]))
+            who = same_model_key(r)
+            if not r["issues"] and who not in seen.setdefault(a, set()):
+                seen[a].add(who)
+                o["votes"] += 1
+                o["by"].append(r["name"])
+    return out

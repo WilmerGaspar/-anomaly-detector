@@ -79,6 +79,12 @@ def _render_guide():
         refs = G.references_from_log(ss.get("guide_log"), R["key"])
         gate = evaluate(R["card"], masked=R.get("masked"), replicate=R.get("replicate"), references=refs or None)
         level = gate["level"]
+    import flow
+    flow_state = {"field_loaded": ss.get("field_name") if field_ok else None, "card": card, "gate": gate,
+                  "log": ss.get("guide_log") or [], "n_null": ss.get("n_null", 99),
+                  "source_kind": ss.get("source_kind", flow.MAST_KIND), "has_search": bool(ss.get("search")), "obj": obj}
+    _run_orders(flow_state)                       # cola de órdenes elegidas: la siguiente, si no hay otra en marcha
+    flow_items, feasible = flow.review(flow_state), flow.feasible(flow_state)
     msg = G.next_step({"mode": "image", "source_kind": ss.get("source_kind", "Archivo MAST (STScI)"),
                        "mission": ss.get("mission", next(iter(CURATED))), "obj": obj or (CURATED[next(iter(CURATED))][0]),
                        "has_search": bool(ss.get("search")), "has_prods": ss.get("prods") is not None,
@@ -112,21 +118,67 @@ def _render_guide():
                 with st.chat_message("assistant", avatar="📖"):
                     st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
             st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
-            AI.render_controls(q, card, msg, log, gate)
+            AI.render_controls(q, card, msg, log, gate, flow_items=flow_items, feasible=feasible)
         theme.taskbar(ss.get("ai_tray") or [], theme.tasks_for(field_ok))      # fija abajo, con el semáforo
-        # Respuestas de las IA a lo ancho del recuadro, en vivo según llegan.
-        AI.render_council(msg, _guide_action)
+        # Órdenes de trabajo (revisión del flujo + propuestas) y respuestas de las IA, a lo ancho.
+        AI.render_orders(flow_items, feasible, _queue_orders)
+        AI.render_council(msg, _guide_action, feasible=feasible)
 
 
-def _guide_action(a):
-    """Botones ▶ de la guía y propuesta aceptada de las IA: ponen la marca y recargan."""
+def _guide_action(a, keep_notes=False):
+    """Botones ▶ de la guía, propuesta aceptada de las IA y órdenes: ponen la marca y recargan. Corre antes
+    de crear los controles de abajo, así que puede cambiar su valor (subrogados, misión, objeto)."""
+    import flow
     ss = st.session_state
-    ss["guide_note"] = []
+    if not keep_notes:
+        ss["guide_note"] = []
     if a == "auto_analyze":
         ss["auto_analyze"] = True
+    elif a == "more_null":
+        ss["n_null"] = flow.next_null(ss.get("n_null", 99)) or flow.NULL_LEVELS[-1]
+        ss["auto_analyze"] = True
+    elif a == "known_control":
+        ss["source_kind"], ss["mission"], ss["obj_pick"] = flow.MAST_KIND, flow.CONTROL[0], flow.CONTROL[1]
+        for k in ("search", "prods", "prods_obs"):
+            ss.pop(k, None)
+        ss["autopilot"] = "full"
     else:
         ss["autopilot"] = "other" if a == "other_filter" else "full"
     st.rerun()
+
+
+def _queue_orders(actions):
+    """«▶ Ejecutar las órdenes marcadas»: quedan en cola y se ejecutan una tras otra."""
+    ss = st.session_state
+    ss["order_queue"] = list(actions)
+    ss["order_log"] = []
+    st.rerun()
+
+
+def _run_orders(state):
+    """Si hay órdenes en cola y ninguna en marcha, lanza la siguiente que se pueda hacer ahora. Al acabar
+    la cola, pide a las IA otra revisión del flujo (si la casilla está marcada)."""
+    import flow
+
+    import ai_panel as AI
+    ss = st.session_state
+    if ss.get("autopilot") or ss.get("auto_analyze"):
+        return                                     # una orden en marcha: se espera a que termine
+    now = ss.pop("order_now", None)
+    if now:
+        done = ss.get("analysis_count", 0) > ss.pop("order_count0", 0)
+        ss.setdefault("order_log", []).append("%s %s%s" % ("✔" if done else "✖", AI.ACTION_LABELS[now].lstrip("▶ "),
+                                                          "" if done else " (sin resultado nuevo: mira la nota de la guía)"))
+        if not ss.get("order_queue") and ss.get("auto_review_after", True):
+            ss["flow_review_request"] = True
+    queue = ss.get("order_queue") or []
+    while queue:
+        a = queue.pop(0)
+        if a in flow.feasible(state):
+            ss["order_now"], ss["order_count0"] = a, ss.get("analysis_count", 0)
+            _guide_action(a, keep_notes=True)      # recarga (las notas de las órdenes anteriores siguen a la vista)
+        else:
+            ss.setdefault("order_log", []).append("✖ %s (no se puede ahora)" % AI.ACTION_LABELS[a].lstrip("▶ "))
 
 
 _render_guide()
@@ -134,7 +186,8 @@ _render_guide()
 # ---------------------------------------------------------------- ajustes avanzados
 with st.sidebar:
     st.markdown("**Ajustes avanzados**")
-    n_null = st.select_slider("Subrogados del nulo", options=[49, 99, 199, 499], value=99,
+    st.session_state.setdefault("n_null", 99)      # con clave: la orden «más subrogados» lo puede subir
+    n_null = st.select_slider("Subrogados del nulo", options=[49, 99, 199, 499], key="n_null",
                               help="p mínimo posible = 1/(n+1). Con 99, p ≥ 0.01.")
     st.caption("p mínimo posible: %.4f" % (1.0 / (n_null + 1)))
     st.markdown("**Descriptores**")
@@ -857,6 +910,7 @@ if run_now:
                                hole_frac=hole_frac, max_empty_fraction=MAX_EMPTY_FRACTION)
         out["key"] = pkey + (x0, y0, side)
         st.session_state["results"] = out
+        st.session_state["analysis_count"] = st.session_state.get("analysis_count", 0) + 1
         import json as _json
 
         import guide as G

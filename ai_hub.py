@@ -205,26 +205,70 @@ def status_detail(provider, s):
     return " · ".join(parts)
 
 
-def ask_all(providers, question, context, post=None):
-    """La misma pregunta a todas las IA con clave, en paralelo. Lista de resultados verificados."""
-    from concurrent.futures import ThreadPoolExecutor
+def _messages(question, context):
+    return [{"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "DATOS:\n%s\n\nPREGUNTA: %s" % (context, question)}]
+
+
+def _result(p, a, question, context):
+    if a["ok"] and not a["text"]:
+        # HTTP 200 sin texto: el modelo gastó los tokens razonando y no llegó a responder.
+        a = dict(a, ok=False, detail="respuesta vacía (el modelo no terminó de responder)")
+    text, action = split_action(a["text"]) if a["ok"] else ("", None)
+    issues = verify(text, context + "\n" + question) if a["ok"] else []
+    return {"id": p["id"], "name": p["name"], "model": p["model"], "ok": a["ok"], "text": text,
+            "action": action, "issues": issues, "detail": a["detail"], "latency_ms": a["latency_ms"]}
+
+
+def ask_iter(providers, question, context, post=None):
+    """La misma pregunta a todas las IA con clave, en paralelo; entrega cada resultado (ya
+    verificado) en cuanto llega, para que la pantalla lo muestre sin esperar a la más lenta."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     active = [p for p in providers if p.get("api_key")]
     if not active:
-        return []
-    messages = [{"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": "DATOS:\n%s\n\nPREGUNTA: %s" % (context, question)}]
+        return
+    messages = _messages(question, context)
     with ThreadPoolExecutor(max_workers=len(active)) as ex:
-        answers = list(ex.map(lambda p: chat(p, messages, max_tokens=ANSWER_TOKENS, post=post), active))
-    out = []
-    for p, a in zip(active, answers):
-        if a["ok"] and not a["text"]:
-            # HTTP 200 sin texto: el modelo gastó los tokens razonando y no llegó a responder.
-            a = dict(a, ok=False, detail="respuesta vacía (el modelo no terminó de responder)")
-        text, action = split_action(a["text"]) if a["ok"] else ("", None)
-        issues = verify(text, context + "\n" + question) if a["ok"] else []
-        out.append({"id": p["id"], "name": p["name"], "model": p["model"], "ok": a["ok"], "text": text,
-                    "action": action, "issues": issues, "detail": a["detail"], "latency_ms": a["latency_ms"]})
-    return out
+        futures = {ex.submit(chat, p, messages, ANSWER_TOKENS, 60, post): p for p in active}
+        for fut in as_completed(futures):
+            yield _result(futures[fut], fut.result(), question, context)
+
+
+def ask_all(providers, question, context, post=None):
+    """Todas las respuestas, en el orden de la lista de proveedores."""
+    order = {p["id"]: i for i, p in enumerate(providers)}
+    return sorted(ask_iter(providers, question, context, post=post), key=lambda r: order[r["id"]])
+
+
+# Preguntas de un clic en el panel: cubren lo que más se pregunta tras un análisis.
+QUICK_QUESTIONS = [
+    ("📋 Explícame el resultado", "Explícame el resultado y cuál es el siguiente paso."),
+    ("🧪 ¿Qué hipótesis y qué prueba la decide?",
+     "De la tabla de hipótesis, ¿cuáles son compatibles y qué prueba concreta de la tabla decidiría entre ellas?"),
+    ("⚠️ ¿Qué NO puedo afirmar?", "¿Qué NO se puede afirmar con estos datos y por qué?"),
+    ("🔭 ¿Qué hago ahora?", "¿Cuál es la siguiente acción más útil y por qué?"),
+]
+
+
+# ---------------------------------------------------------------- claves pegadas en la app
+
+KEY_PREFIXES = (("nvapi-", "NVIDIA_API_KEY"), ("gsk_", "GROQ_API_KEY"), ("sk-or-", "OPENROUTER_API_KEY"),
+                ("AIza", "GEMINI_API_KEY"))
+
+
+def detect_key_name(key):
+    """Qué proveedor es una clave por cómo empieza (NVIDIA nvapi-, Groq gsk_, OpenRouter sk-or-,
+    Gemini AIza). None si no se reconoce: entonces la persona elige el proveedor."""
+    k = str(key or "").strip()
+    for prefix, name in KEY_PREFIXES:
+        if k.startswith(prefix):
+            return name
+    return None
+
+
+def providers_for_key(name):
+    """Nombres de las IA que se encienden con esa clave (la de OpenRouter enciende dos)."""
+    return [p["name"] for p in PROVIDERS if p["key"] == name]
 
 
 # ---------------------------------------------------------------- contexto e instrucciones
@@ -234,16 +278,44 @@ ANSWER_TOKENS = 2048
 DEFAULT_QUESTION = "Explícame el resultado y cuál es el siguiente paso."
 
 SYSTEM_PROMPT = (
-    "Eres el asistente de CMS-80, una app que analiza imágenes de telescopios (FITS de Hubble y JWST). "
-    "Respondes en español, claro y breve (máximo 150 palabras), a una persona sin formación técnica.\n"
-    "Reglas obligatorias:\n"
-    "1. Usa SOLO los DATOS que te paso. Si la respuesta no está en ellos, di: «No lo sé con estos datos».\n"
-    "2. No cambies ni discutas el semáforo: lo calcula la app con pruebas estadísticas.\n"
-    "3. Nunca digas que algo es un descubrimiento ni física nueva: como mucho, una pregunta que hay que comprobar.\n"
-    "4. Si citas un número, cópialo tal cual de los DATOS. No inventes números ni referencias.\n"
-    "5. Termina SIEMPRE con una línea «ACCIÓN: X», donde X es una de: ninguna, hazlo_por_mi, otro_archivo, "
-    "analizar (solo las que aparezcan en ACCIONES_DISPONIBLES)."
+    "Eres el intérprete de CMS-80, una app que analiza imágenes de telescopios (FITS de Hubble y JWST). "
+    "Hablas en español claro a una persona sin formación técnica.\n"
+    "REGLAS (obligatorias; si no puedes cumplir una, dilo):\n"
+    "1. Usa SOLO los DATOS. Para lo que no esté en ellos responde exactamente: «No lo sé con estos datos».\n"
+    "2. Detrás de cada número o afirmación sobre el análisis, pon entre corchetes de qué dato sale, con su nombre en "
+    "los DATOS. Ejemplo: β = 2.6 [beta_espectro]; 🟠 [semaforo].\n"
+    "3. Copia los números tal cual. No inventes números, objetos, distancias, estrellas ni referencias: solo puedes "
+    "citar las referencias que aparecen en la tabla de HIPOTESIS.\n"
+    "4. El semáforo y la tabla de hipótesis los calcula la app con pruebas: no los cambies ni los contradigas. "
+    "Una hipótesis «compatible» no está demostrada.\n"
+    "5. Nunca digas que algo es un descubrimiento, física nueva o algo seguro: como mucho, una pregunta por comprobar.\n"
+    "6. Puedes explicar conceptos generales (qué es β, qué es un filtro), marcándolos como (concepto general).\n"
+    "FORMATO (máximo 220 palabras, con estos cuatro títulos en negrita):\n"
+    "**Qué muestra:** …\n**Qué significa:** …\n**Qué NO se puede afirmar:** …\n**Siguiente prueba:** …\n"
+    "Termina con una línea «ACCIÓN: X», donde X es una de ACCIONES_DISPONIBLES (si no aplica, «ninguna»)."
 )
+
+
+def _intermittency(card):
+    """Curtosis de incrementos a 1 px frente al 95 % del nulo (saltos bruscos de brillo)."""
+    sc = (card.get("analytics") or {}).get("scales") or {}
+    fl, q95 = sc.get("flatness") or [], sc.get("flatness_null_q95") or []
+    return {"curtosis_1px": fl[0], "nulo_95": q95[0]} if fl and q95 else None
+
+
+def _hot_tiles(card, n=3):
+    """Las zonas del mapa local con más señal, en píxeles de la imagen (x, y) y su z."""
+    lm = (card.get("analytics") or {}).get("local_map") or {}
+    z, tile = lm.get("z"), lm.get("tile_px")
+    crop = ((card.get("analysis") or {}).get("crop")) or {}
+    if not z or not tile:
+        return None
+    cells = [(float(v), i, j) for i, row in enumerate(z) for j, v in enumerate(row) if v is not None and v == v]
+    out = []
+    for v, i, j in sorted(cells, reverse=True)[:n]:
+        x0, y0 = crop.get("x0", 0) + j * tile[1], crop.get("y0", 0) + i * tile[0]
+        out.append({"x": [x0, x0 + tile[1]], "y": [y0, y0 + tile[0]], "z": round(v, 1)})
+    return out
 
 
 def build_context(card, log=None, step=None, actions=(), gate=None):
@@ -267,6 +339,20 @@ def build_context(card, log=None, step=None, actions=(), gate=None):
                                             for c in gate.get("checks") or []]},
             "prueba_frente_al_nulo": {"p": st_.get("p_value"), "z": st_.get("z_score"), "pasan_fdr": fdr.get("n_passed"),
                                       "de": fdr.get("n_tested"), "descriptores_que_pasan": fdr.get("passed_descriptors")},
+            "control_estrellas": {k: (card.get("discovery_controls") or {}).get("point_sources_masked", {}).get(k)
+                                  for k in ("n_masked", "masked_fraction", "valid", "n_passed")},
+            "repeticion_otra_semilla": (card.get("discovery_controls") or {}).get("replicate"),
+            "difraccion": {"beta_sin_corregir": fit.get("beta_raw"), "corregida": fit.get("psf_corrected"),
+                           "beta_no_medible": fit.get("psf_limited"),
+                           "lambda_um": ((card.get("analysis") or {}).get("psf") or {}).get("lambda_um")},
+            "direccion": {"estructuras_en_el_cielo_PA": (d.get("anisotropy") or {}).get("structure_pa_deg"),
+                          "estructuras_en_la_imagen": (d.get("anisotropy") or {}).get("structure_direction_degrees"),
+                          "coherencia": (d.get("anisotropy") or {}).get("orientation_coherence"),
+                          "coherencia_nulo_95": (d.get("anisotropy") or {}).get("orientation_null_q95"),
+                          "p_direccion": (d.get("anisotropy") or {}).get("orientation_p")},
+            "centro_RA_Dec": [src.get("center_ra_deg"), src.get("center_dec_deg")],
+            "intermitencia": _intermittency(card),
+            "zonas_mas_fuertes": _hot_tiles(card),
             "medidas": {"beta_espectro": fit.get("beta"), "r2_ajuste": fit.get("r2"),
                         "lacunaridad": (d.get("fractal_base") or {}).get("lacunarity"),
                         "multifractalidad": (d.get("fractal_base") or {}).get("multifractality_index"),
@@ -281,15 +367,39 @@ def build_context(card, log=None, step=None, actions=(), gate=None):
             ctx["HIPOTESIS"] = {"clasificacion": hyp.get("title"),
                                 "tabla": [{"mecanismo": r["mechanism"], "estado": r["status"], "por_que": r["why"],
                                            "pregunta": r["question"], "referencia": r["refs"]} for r in hyp.get("rows", [])]}
+        nov = (gate or {}).get("novelty") or {}
+        if nov.get("available"):
+            ctx["ANALISIS"]["novedad_frente_a_tus_analisis"] = {"max_z": nov.get("max_abs_z"),
+                                                                "referencias": nov.get("n_references")}
     if log:
         ctx["BITACORA"] = [{"objeto": e.get("target"), "archivo": e.get("file"), "filtro": e.get("filter"),
                             "semaforo": e.get("level")} for e in log[-10:]]
     return json.dumps(ctx, ensure_ascii=False, default=str)
 
 
+def _paths(obj, prefix=""):
+    """Todos los nombres de datos del contexto, con y sin la ruta («beta_espectro», «medidas.beta_espectro»…)."""
+    out = set()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            full = (prefix + "." + k) if prefix else k
+            parts = full.split(".")
+            out.update(".".join(parts[i:]) for i in range(len(parts)))
+            out |= _paths(v, full)
+    elif isinstance(obj, list):
+        for v in obj:
+            out |= _paths(v, prefix)
+    return out
+
+
 # ---------------------------------------------------------------- verificación
 
 _NUM = re.compile(r"(?<![\w.])-?\d+(?:[.,]\d+)?")
+# «Apellido 1999», «Apellido et al. 1999», «Apellido & Otro 1999», «Apellido (1999)».
+_REF = re.compile(r"\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)(?:\s+(?:et\s+al\.?|y|&|and)\s*(?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)?"
+                  r"[\s,]*\(?((?:19|20)\d{2})\)?")
+# Citas del dato de origen: [beta_espectro], [semaforo], [medidas.beta_espectro]…
+_CITE = re.compile(r"\[([A-Za-z_][\w.]*)\](?!\()")          # no los enlaces [texto](url)
 OVERCLAIMS = ("descubrimiento confirmado", "hemos descubierto", "has descubierto", "se ha descubierto",
               "nueva fisica", "fisica nueva", "demuestra que", "sin duda", "con total certeza", "es seguro que")
 
@@ -329,6 +439,19 @@ def verify(answer, allowed_text):
     claims = [c for c in OVERCLAIMS if c in low]
     if claims:
         issues.append("afirma de más («%s»)" % claims[0])
+    allowed_norm = _norm(allowed_text)
+    refs = [m.group(1) for m in _REF.finditer(str(answer)) if _norm(m.group(1)) not in allowed_norm]
+    if refs:
+        issues.append("cita referencias que no están en tus datos: %s" % ", ".join(sorted(set(refs))[:3]))
+    try:
+        known = _paths(json.loads(allowed_text.split("\n", 1)[0])) if allowed_text.lstrip().startswith("{") else None
+    except ValueError:
+        known = None
+    if known is not None:
+        known_norm = {_norm(k) for k in known}
+        bad_cites = [c for c in _CITE.findall(str(answer)) if _norm(c.strip()) not in known_norm]
+        if bad_cites:
+            issues.append("cita datos que no existen: %s" % ", ".join("[%s]" % c for c in sorted(set(bad_cites))[:3]))
     return issues
 
 

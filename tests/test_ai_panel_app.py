@@ -54,7 +54,7 @@ def test_without_keys_everything_is_white_and_nothing_is_sent(monkeypatch):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at)
-    assert "⚪ NVIDIA · ⚪ Groq · ⚪ OpenRouter · ⚪ DeepSeek R1 · ⚪ Gemini" in text
+    assert all("⚪ %s" % n in text for n in ("NVIDIA", "Groq", "OpenRouter", "DeepSeek R1", "Gemini"))
     assert not [b for b in at.main.button if b.key == "ai_ask"] and calls == []
 
 
@@ -70,7 +70,7 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     # Al abrir se prueba cada conexión una vez: dos 🟢, la clave mala 🔴 con el motivo (también
     # en DeepSeek R1, que usa la misma clave de OpenRouter), Gemini ⚪.
     text = _texts(at)
-    assert "🟢 NVIDIA · 🟢 Groq · 🔴 OpenRouter · 🔴 DeepSeek R1 · ⚪ Gemini" in text
+    assert all(c in text for c in ("🟢 NVIDIA", "🟢 Groq", "🔴 OpenRouter", "🔴 DeepSeek R1", "⚪ Gemini"))
     assert "clave no válida o sin permiso (401)" in text
     assert len(calls) == 4
     at.run()
@@ -81,7 +81,7 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     text = _texts(at)
     assert "✅ pasa la comprobación" in text and "Primero hay que buscar" in text
     assert "⚠️ cita números que no están en tus datos: 7,77" in text and "afirma de más" in text
-    assert "🔴 OpenRouter: clave no válida" in text
+    assert "clave no válida o sin permiso (401)" in text and "🧭" in text          # tarjeta en 🔴 y consenso
     assert "SECRETO" not in text + " ".join(str(m.value) for m in at.markdown)   # la clave nunca se ve
     # Solo cuenta la respuesta que pasa la comprobación: 1 de 2.
     do = [b for b in at.main.button if b.key == "ai_do"]
@@ -108,3 +108,30 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     for k in ("beta_espectro", "lacunaridad", "multifractalidad", "betti_0", "anisotropia", "exceso_crestas"):
         assert m[k] is not None, k
     assert ctx["ACCIONES_DISPONIBLES"][0] == "ninguna" and len(ctx["BITACORA"]) == 1
+
+
+def test_paste_a_key_in_the_app(monkeypatch):
+    """Sin Secrets: se pega la clave en la app, se reconoce por su prefijo (nvapi- → NVIDIA), se
+    prueba la conexión con ella y nunca aparece en pantalla."""
+    for k in list(KEYS) + ["GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    seen = []
+
+    def post(url, headers=None, json=None, timeout=None, **kw):
+        seen.append((url, headers["Authorization"]))
+        return _Resp(200, "OK")
+
+    monkeypatch.setattr(requests, "post", post)
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
+    at.run()
+    box = next(t for t in at.text_input if t.label == "Pega aquí tu clave API")
+    box.input("nvapi-SECRETO-PEGADO")
+    next(b for b in at.button if "Conectar" in str(b.label)).click().run()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["ai_session_keys"] == {"NVIDIA_API_KEY": "nvapi-SECRETO-PEGADO"}
+    assert seen and seen[0][0].startswith("https://integrate.api.nvidia.com") and seen[0][1].endswith("SECRETO-PEGADO")
+    text = _texts(at) + " ".join(str(m.value) for m in at.markdown)
+    assert "🟢 NVIDIA" in text and "SECRETO" not in text
+    assert [b for b in at.main.button if b.key == "ai_ask"]                      # ya se puede preguntar

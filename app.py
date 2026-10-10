@@ -117,7 +117,9 @@ def _render_guide():
                 with st.chat_message("assistant", avatar="📖"):
                     st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
             st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
-            AI.render(q, card, msg, log, gate, _guide_action)
+            AI.render_controls(q, card, msg, log, gate)
+        # Respuestas de las IA a lo ancho del recuadro, en vivo según llegan.
+        AI.render_council(msg, _guide_action)
 
 
 def _guide_action(a):

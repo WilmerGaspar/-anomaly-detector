@@ -96,7 +96,8 @@ def test_verify_accepts_numbers_from_the_data(answer):
 
 def test_verify_flags_invented_numbers_and_overclaims():
     issues = H.verify("β = 3.67, como dice Smith 2019.", DATA)
-    assert len(issues) == 1 and "3,67" in issues[0] and "2019" in issues[0]
+    assert len(issues) == 2 and "3,67" in issues[0] and "2019" in issues[0]
+    assert "referencias" in issues[1] and "Smith" in issues[1]                 # referencia inventada
     assert any("afirma de más" in i for i in H.verify("Hemos descubierto física nueva.", DATA))
     assert any("afirma de más" in i for i in H.verify("Esto DEMUESTRA QUE hay turbulencia", DATA))
 
@@ -223,3 +224,57 @@ def test_deepseek_r1_by_openrouter_follows_its_usage_rules():
     sent.clear()
     H.chat(ps["groq"], [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}], post=post)
     assert sent[0][1]["temperature"] == 0.2 and len(sent[0][1]["messages"]) == 2              # los demás, igual
+
+
+def test_verify_checks_cited_data_and_references_against_the_context():
+    ctx = json.dumps({"ANALISIS": {"medidas": {"beta_espectro": 2.61}, "semaforo": {"nivel": "robust"}},
+                      "HIPOTESIS": {"tabla": [{"referencia": "Arzoumanian et al. 2011, A&A 529, L6"}]}})
+    assert H.verify("β = 2,61 [beta_espectro]; 🟢 [semaforo]; ver Arzoumanian et al. 2011.", ctx) == []
+    bad = H.verify("β = 2,61 [medidas.beta_inventada], como mostró Pérez et al. 2011.", ctx)
+    assert any("[medidas.beta_inventada]" in i for i in bad) and any("Pérez" in i for i in bad)
+    assert H.verify("Más en la [web](https://example.org).", ctx) == []          # enlaces: no son citas
+
+
+def test_rules_and_format_are_explicit():
+    for needle in ("No lo sé con estos datos", "entre corchetes", "referencias que aparecen en la tabla",
+                   "**Qué muestra:**", "**Qué NO se puede afirmar:**", "**Siguiente prueba:**", "ACCIÓN:"):
+        assert needle in H.SYSTEM_PROMPT, needle
+    assert len(H.QUICK_QUESTIONS) >= 4
+
+
+@pytest.mark.parametrize("key,name", [("nvapi-abc", "NVIDIA_API_KEY"), ("  sk-or-v1-x", "OPENROUTER_API_KEY"),
+                                      ("gsk_123", "GROQ_API_KEY"), ("AIzaSy", "GEMINI_API_KEY"), ("hola", None)])
+def test_key_prefix_detection(key, name):
+    assert H.detect_key_name(key) == name
+    assert H.providers_for_key("OPENROUTER_API_KEY") == ["OpenRouter", "DeepSeek R1"]
+
+
+def test_answers_arrive_as_they_finish():
+    import time as _t
+
+    def post(url, headers, json, timeout):
+        _t.sleep(0.3 if "nvidia" in url else 0.0)                 # NVIDIA tarda más
+        return _Resp(content="ok\nACCIÓN: ninguna")
+
+    ps = _providers(NVIDIA_API_KEY="a", GROQ_API_KEY="b")
+    order = [r["id"] for r in H.ask_iter(ps, "x", DATA, post=post)]
+    assert order == ["groq", "nvidia"]                            # llega primero la rápida
+    assert [r["id"] for r in H.ask_all(ps, "x", DATA, post=post)] == ["nvidia", "groq"]   # orden fijo al final
+
+
+def test_context_carries_more_interpretation():
+    card = {"source": {"filename": "f.fits", "center_ra_deg": 315.4, "center_dec_deg": 68.2},
+            "analysis": {"crop": {"x0": 100, "y0": 50, "side": 400}, "psf": {"lambda_um": 21.0}},
+            "analytics": {"spectrum": {"fit": {"beta": 2.6, "beta_raw": 3.7, "psf_corrected": True}},
+                          "scales": {"flatness": [36.5], "flatness_null_q95": [12.4]},
+                          "local_map": {"z": [[1, 251.1], [3, -1]], "tile_px": [200, 200]}},
+            "descriptors": {"anisotropy": {"structure_pa_deg": 47.0, "orientation_coherence": 0.4,
+                                           "orientation_p": 0.01}},
+            "discovery_controls": {"point_sources_masked": {"n_masked": 42, "masked_fraction": 0.12, "valid": False}},
+            "discovery_gate": {"level": "unconfirmed", "checks": []}}
+    a = json.loads(H.build_context(card))["ANALISIS"]
+    assert a["difraccion"]["beta_sin_corregir"] == 3.7 and a["difraccion"]["lambda_um"] == 21.0
+    assert a["direccion"]["estructuras_en_el_cielo_PA"] == 47.0 and a["direccion"]["p_direccion"] == 0.01
+    assert a["control_estrellas"]["valid"] is False and a["intermitencia"]["curtosis_1px"] == 36.5
+    assert a["zonas_mas_fuertes"][0] == {"x": [300, 500], "y": [50, 250], "z": 251.1}
+    assert a["centro_RA_Dec"] == [315.4, 68.2]

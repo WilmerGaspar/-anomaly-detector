@@ -880,3 +880,40 @@ muestreado casi al límite y su respuesta (MTF) cae dentro de las escalas donde 
      y hasta 6000 tokens y 150 s de espera, porque razona antes de responder. El borrador
      `<think>…</think>` se quita y la respuesta pasa la misma comprobación de cifras y exageraciones.
      La prueba de conexión sigue siendo mínima (16 tokens).
+
+## 🤖 Panel de IA: pegar la clave en la app, consejo en vivo y reglas más estrictas
+
+El usuario no encontraba dónde poner la clave API en Streamlit Cloud y pidió una pantalla más
+dinámica, con más interpretación y sin alucinaciones.
+
+149. **Pegar la clave en la app** (🔑 Conectar una IA). El proveedor se reconoce por cómo empieza
+     la clave: `nvapi-` NVIDIA, `gsk_` Groq, `sk-or-` OpenRouter + DeepSeek R1, `AIza` Gemini. Si
+     no se reconoce, se elige de una lista. La clave solo vive en esta sesión del navegador: va en
+     un campo de contraseña, se borra del campo al enviar, no se guarda en archivos ni se muestra,
+     y hay un botón para olvidarla. Debajo están los pasos exactos para dejarla fija en Secrets
+     (share.streamlit.io → ⋮ → Settings → Secrets). El detalle de cada IA dice si su clave es
+     «pegada en esta sesión» o «de Secrets».
+150. **Consejo en vivo y a lo ancho**:
+     - Cada respuesta aparece en cuanto llega («⏳ Groq está pensando…» mientras NVIDIA ya
+       respondió), en tarjetas de dos columnas.
+     - Arriba, el consenso: cuántas respondieron, cuántas pasan la comprobación y la acción
+       propuesta, que se acepta con un clic.
+     - Historial de las últimas 6 preguntas.
+     - Cuatro preguntas de un clic: explícame el resultado; qué hipótesis y qué prueba la decide;
+       qué NO puedo afirmar; qué hago ahora.
+     - Semáforo en fichas de colores.
+151. **Más datos para interpretar**: corrección por la difracción (β sin corregir y λ), dirección
+     de las estructuras en el cielo con su coherencia y p, centro RA/Dec, control de estrellas
+     (cuántas, qué área, si es válido), repetición con otra semilla, intermitencia frente al nulo,
+     las 3 zonas con más señal en coordenadas de la imagen y la novedad frente a tus análisis.
+152. **Reglas más claras**: solo los DATOS («No lo sé con estos datos»); cada cifra con su dato de
+     origen entre corchetes; solo las referencias de la tabla de hipótesis; sin contradecir el
+     semáforo ni la tabla; sin descubrimientos ni certezas; los conceptos generales marcados.
+     Formato fijo en cuatro apartados: Qué muestra / Qué significa / Qué NO se puede afirmar /
+     Siguiente prueba.
+153. **Comprobación ampliada** (⚠️ y sin voto): además de las cifras que no están en los datos y
+     las afirmaciones de más, ahora detecta las referencias inventadas («Smith et al. 2019») y los
+     datos citados entre corchetes que no existen. Los enlaces no cuentan como citas.
+154. Tests: claves por prefijo, pegar una clave en la app real (se prueba con ella y nunca se ve),
+     respuestas en el orden en que llegan, contexto ampliado, reglas y formato, citas y
+     referencias inventadas.

@@ -1033,3 +1033,44 @@ avanzar se envió una maqueta y se eligió «Windows 2000 completo».
      - la fila de comprobaciones sigue al verificador;
      - cada acceso de la barra de tareas tiene su sección;
      - el tema no carga nada de fuera.
+
+## 🤖 «¿Listo para trabajar?», revisión del flujo y órdenes que tú eliges
+
+Petición: al conectar la IA, que aparezca una ventana preguntando si estás listo, que la IA proponga
+órdenes para analizar, que tú elijas cuáles y que revise el flujo con más rigor que una persona.
+
+175. **Ventana «🤖 Asistente CMS-80 — ¿Listo para trabajar?»** (cuadro de diálogo de Windows 2000).
+     - Sale una vez por sesión, en cuanto una IA está 🟢.
+     - Dice qué IA hay y los puntos pendientes del flujo. Saludar no gasta consultas.
+     - «✅ Sí» pide a las IA la revisión; «Ahora no» o la ✕ la cierran.
+176. **Revisión del flujo con reglas fijas (`flow.py`, no IA: no puede inventar)**. Cada punto lleva su
+     estado (✅ ❌ ⏳ ℹ️). Se revisan:
+     - el archivo cargado y el análisis de la región;
+     - cada comprobación del semáforo;
+     - la precisión del nulo: si p está en el mínimo posible, pide más subrogados;
+     - otro filtro del mismo objeto;
+     - las referencias para Novedad (5);
+     - un control conocido en la bitácora;
+     - la difracción.
+177. **Órdenes de una lista cerrada**:
+     - las que ya había: hazlo_por_mi, analizar, otro_archivo;
+     - nuevas: **mas_subrogados**, que sube 99 → 199 → 499 y repite el análisis, y **control_conocido**,
+       que hace HST · Crab Nebula con el piloto automático.
+     - Las IA las proponen con `ORDEN: clave — motivo [dato]`. Solo valen claves de la lista, como mucho 3.
+     - Votan solo las respuestas que pasan la comprobación, y el mismo modelo vota una vez.
+178. **Ventana «📋 Órdenes de trabajo»**:
+     - la revisión del flujo y las órdenes propuestas, con el voto de las IA (🤖) y de las reglas (🧠) y sus
+       motivos (las respuestas que no pasan la comprobación se ven marcadas);
+     - tú marcas las casillas y pulsas «▶ Ejecutar»;
+     - se ejecutan en cola, en orden lógico (cargar → analizar → afinar → confirmar → control), una tras
+       otra, con «⏹ Parar»;
+     - cada orden queda anotada con ✔ si dio un resultado nuevo o ✖ si no;
+     - al acabar, las IA vuelven a revisar el flujo con el resultado (casilla para apagarlo).
+179. Los subrogados del nulo tienen ahora clave en la barra lateral, para que la orden pueda subirlos.
+180. Tests (`tests/test_flow.py`):
+     - las reglas de revisión;
+     - los niveles del nulo y el orden de ejecución;
+     - solo órdenes de la lista y los votos verificados una vez por modelo;
+     - el contexto con REVISION_FLUJO;
+     - de punta a punta en la app real: ventana → «Sí» → órdenes → ejecutar → buscar, cargar y analizar →
+       nueva revisión.

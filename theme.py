@@ -101,6 +101,16 @@ h2#cms-80-cosmic-materials-scout{font-size:0 !important;height:0;margin:0 !impor
 [data-testid="stSidebarContent"]::before{content:"CMS-80  Scout";position:absolute;left:0;top:0;bottom:0;width:24px;
   background:linear-gradient(0deg,var(--w-t1),#3a6ea5 60%,var(--w-t2));color:#fff;font:bold 15px var(--w-font);
   writing-mode:vertical-rl;transform:rotate(180deg);padding:14px 0;letter-spacing:1px}
+/* ---------- ventanas emergentes («¿Listo para trabajar?»): cuadro de diálogo de la época ---------- */
+[data-testid="stDialog"] [role="dialog"]{background:var(--w-face) !important;border-radius:0 !important;border:1px solid;
+  border-color:var(--w-hi) var(--w-dk) var(--w-dk) var(--w-hi);padding:3px 14px 14px !important;
+  box-shadow:inset -1px -1px var(--w-sh),inset 1px 1px var(--w-lt),8px 10px 30px rgba(0,0,0,.55) !important}
+[data-testid="stDialog"] [role="dialog"]>h2{background:linear-gradient(90deg,var(--w-t1),var(--w-t2));
+  margin:0 -11px 12px !important;padding:4px 40px 4px 8px !important}
+[data-testid="stDialog"] [role="dialog"]>h2 *{color:#fff !important;font:bold 15px var(--w-font) !important;margin:0 !important}
+[data-testid="stDialog"] [role="dialog"]>button[aria-label="Close"]{position:absolute;top:6px !important;right:16px !important;
+  width:18px;height:16px;padding:0;background:var(--w-face) !important;color:#000 !important;border-radius:0;z-index:2;
+  border:1px solid;border-color:var(--w-hi) var(--w-dk) var(--w-dk) var(--w-hi)}
 /* ---------- barra de tareas ---------- */
 .w2k-taskbar{position:fixed;left:0;right:0;bottom:0;height:32px;z-index:1000100;background:var(--w-face);
   border-top:1px solid var(--w-hi);box-shadow:0 -1px var(--w-lt);display:flex;align-items:center;gap:4px;padding:0 3px;

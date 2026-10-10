@@ -937,3 +937,29 @@ el motivo quedaba escondido en «Detalle de cada IA».
      hace falta ir a Secrets. Las instrucciones de conexión ya avisan de la privacidad de OpenRouter.
 158. Tests: los cuatro mensajes de OpenRouter, sin claves ni JSON en bruto, aviso visible en la app
      real y prueba de conexión con el modelo cambiado.
+
+## OpenRouter: solo modelos gratis que existan hoy («unavailable for free»)
+
+Caso real (captura del 10-oct-2026): OpenRouter y DeepSeek R1 en 🔴 con «This model is unavailable for
+free. The paid version is available now - use this slug instead: openai/gpt-oss-120b» (y lo mismo con
+`deepseek/deepseek-r1-0528`). OpenRouter retiró esas dos versiones `:free`; las que propone son de pago.
+
+159. **OpenRouter usa `openrouter/free`**, su enrutador oficial y gratuito: en cada pregunta elige un modelo
+     gratis de los que haya ese día, así que no se rompe cuando retiran uno. La tarjeta de la respuesta dice
+     qué modelo contestó (`openrouter/free → …`).
+160. **DeepSeek elige solo un modelo gratis** de la lista pública de OpenRouter (`/api/v1/models`, sin clave):
+     solo precio 0 de entrada y de salida y nombre terminado en `:free`. Si R1 vuelve a ser gratis, va primero;
+     si no, el DeepSeek gratis más nuevo. La lista se lee una vez cada 6 h (si falla, a los 10 min) y, sin
+     ella, se usa uno de reserva. Se llama «DeepSeek» (antes «DeepSeek R1») porque hoy R1 no es gratis.
+161. **Si un modelo elegido solo deja de ser gratis**, la app prueba el siguiente gratis y no vuelve a usar
+     el retirado. **Nunca cambia a la versión de pago** que propone el mensaje. Si no queda ningún DeepSeek
+     gratis, 🔴 lo dice sin hacer la llamada y las demás IA siguen.
+162. **Mensaje claro para «unavailable for free»**: la versión gratis se retiró y el nombre que propone el
+     servicio es de pago («no lo pongas»). El arreglo es dejar vacío el campo en «Detalle de cada IA» →
+     «Cambiar el modelo», o escribir `openrouter/free`. Los demás avisos de modelo también llevan ahí y no a
+     Secrets.
+163. **Consenso honesto**: si dos IA las contesta el mismo modelo (p. ej. `openrouter/free` eligió el mismo
+     DeepSeek), su voto cuenta una vez.
+164. Tests: lista de gratis (precios, `:free`, R1 primero), paso al siguiente gratis sin pedir nunca el de
+     pago, ningún DeepSeek gratis, memoria de 6 h y reintento, modelo que contestó, voto único y el caso de
+     la captura en la app real. Las pruebas nunca leen la lista real (`tests/conftest.py`). 254 en total.

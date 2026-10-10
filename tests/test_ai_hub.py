@@ -1,6 +1,7 @@
 """🤖 Centro de conexiones IA (ai_hub.py): semáforo por IA, consejo en paralelo y verificación,
 sin red (las peticiones HTTP se simulan)."""
 import json
+import time
 
 import pytest
 
@@ -135,13 +136,13 @@ def test_ask_all_in_parallel_with_verification():
         return _Resp(content="")                              # vacía: no cuenta como respuesta
 
     out = {r["id"]: r for r in H.ask_all(ps, "¿Qué es β?", DATA, post=post)}
-    # Gemini sin clave no se consulta; DeepSeek R1 usa la clave de OpenRouter.
+    # Gemini sin clave no se consulta; DeepSeek usa la clave de OpenRouter.
     assert set(out) == {"nvidia", "groq", "openrouter", "deepseek"}
     assert out["nvidia"]["ok"] and out["nvidia"]["issues"] == [] and out["nvidia"]["action"] == "auto_analyze"
     assert "ACCIÓN" not in out["nvidia"]["text"]
     assert out["groq"]["issues"] and not out["openrouter"]["ok"] and "vacía" in out["openrouter"]["detail"]
-    plain = [m for m in sent if len(m["messages"]) == 2]          # los que aceptan mensaje de sistema
-    assert len(plain) == 3 and all(m["messages"][0]["content"] == H.SYSTEM_PROMPT for m in plain)
+    plain = [m for m in sent if len(m["messages"]) == 2]          # sin R1 todos aceptan mensaje de sistema
+    assert len(plain) == 4 and all(m["messages"][0]["content"] == H.SYSTEM_PROMPT for m in plain)
     assert all("PREGUNTA: ¿Qué es β?" in m["messages"][-1]["content"] for m in sent)
     status = H.status_after_answers(H.initial_status(ps), list(out.values()))
     assert status["nvidia"]["state"] == H.CONNECTED and status["openrouter"]["state"] == H.ERROR
@@ -201,17 +202,19 @@ def test_nvidia_uses_the_official_model_without_thinking():
 
 def test_deepseek_r1_by_openrouter_follows_its_usage_rules():
     """DeepSeek-R1 (671B) no cabe en Streamlit Cloud: se usa por OpenRouter con la misma clave.
-    Su repositorio pide temperatura 0.5-0.7 y sin mensaje de sistema; razona antes de responder."""
+    Su repositorio pide temperatura 0.5-0.7 y sin mensaje de sistema; razona antes de responder.
+    Desde oct-2026 R1 ya no es gratis por defecto: se pone a mano (DEEPSEEK_MODEL) si vuelve a serlo."""
     sent = []
 
     def post(url, headers, json, timeout):
         sent.append((url, json, timeout))
         return _Resp(content="<think>razono…</think>β vale 2,85.\nACCIÓN: ninguna")
 
-    ps = {p["id"]: p for p in _providers(OPENROUTER_API_KEY="sk-or-x", GROQ_API_KEY="g")}
+    ps = {p["id"]: p for p in _providers(OPENROUTER_API_KEY="sk-or-x", GROQ_API_KEY="g",
+                                         DEEPSEEK_MODEL="deepseek/deepseek-r1:free")}
     ds = ps["deepseek"]
     assert ds["api_key"] == ps["openrouter"]["api_key"] == "sk-or-x"          # una clave, dos IA
-    assert ds["model"] == "deepseek/deepseek-r1-0528:free" and H.is_reasoning(ds)
+    assert ds["model"] == "deepseek/deepseek-r1:free" and H.is_reasoning(ds) and not ds.get("auto_model")
     out = {r["id"]: r for r in H.ask_all([ds], "¿β?", DATA, post=post)}
     url, js, timeout = sent[0]
     assert url.startswith("https://openrouter.ai/api/v1") and js["temperature"] == 0.6
@@ -224,6 +227,104 @@ def test_deepseek_r1_by_openrouter_follows_its_usage_rules():
     sent.clear()
     H.chat(ps["groq"], [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}], post=post)
     assert sent[0][1]["temperature"] == 0.2 and len(sent[0][1]["messages"]) == 2              # los demás, igual
+
+
+# ---------------------------------------------------------------- solo modelos gratis (OpenRouter)
+
+def test_free_list_keeps_only_zero_price_free_ids_newest_first():
+    from conftest import SAMPLE_MODELS
+    ids = H.free_ids(SAMPLE_MODELS)
+    assert ids == ["google/gemma-4-31b-it:free", "deepseek/deepseek-v4-flash-0731:free", "deepseek/deepseek-v4-flash:free"]
+    # De pago (sin «:free»), enrutadores con precio -1 y precios raros: fuera.
+    odd = {"data": [{"id": "x/y:free", "pricing": {"prompt": "0.001", "completion": "0"}},
+                    {"id": "x/z:free", "pricing": {"prompt": None, "completion": "0"}}, {"id": "x/w:free"}]}
+    assert H.free_ids(odd) == [] and H.free_ids(None) == [] and H.free_ids({}) == []
+    # Si R1 vuelve a ser gratis, va primero.
+    back = {"data": SAMPLE_MODELS["data"] + [{"id": "deepseek/deepseek-r1-0528:free", "created": 1,
+                                              "pricing": {"prompt": "0", "completion": "0"}}]}
+    H._FREE.update(t=time.time(), ids=H.free_ids(back))
+    assert H.free_candidates("deepseek/")[:2] == ["deepseek/deepseek-r1-0528:free", "deepseek/deepseek-v4-flash-0731:free"]
+
+
+def test_openrouter_defaults_are_free_and_never_the_paid_slug():
+    """Caso real (10-oct-2026): «This model is unavailable for free. The paid version is available now - use
+    this slug instead: openai/gpt-oss-120b» (y lo mismo con deepseek-r1-0528). La app solo usa gratis."""
+    ps = {p["id"]: p for p in _providers(OPENROUTER_API_KEY="sk-or-x")}
+    assert ps["openrouter"]["model"] == "openrouter/free"                        # enrutador oficial gratis
+    ds = ps["deepseek"]
+    assert ds["auto_model"] and ds["model"] == "deepseek/deepseek-v4-flash-0731:free" and not H.is_reasoning(ds)
+    assert ds["candidates"] == ["deepseek/deepseek-v4-flash-0731:free", "deepseek/deepseek-v4-flash:free"]
+    assert all(c.endswith(":free") for c in ds["candidates"])
+    # Sin clave de OpenRouter no se lee la lista.
+    H._FREE.update(t=0.0, ids=None)
+    assert not _providers(NVIDIA_API_KEY="k")[3].get("auto_model") and H._FREE["t"] == 0.0
+
+
+def test_retired_free_model_falls_to_the_next_free_one():
+    retired = json.dumps({"error": {"message": "This model is unavailable for free. The paid version is available now "
+                                               "- use this slug instead: deepseek/deepseek-v4-flash", "code": 404}})
+    sent = []
+
+    class _Gone:
+        status_code, text = 404, retired
+
+    def post(url, headers, json, timeout):
+        sent.append(json["model"])
+        if json["model"] == "deepseek/deepseek-v4-flash-0731:free":
+            return _Gone()
+        return _Resp(body={"model": json["model"], "choices": [{"message": {"content": "OK"}}]})
+
+    ds = _providers(OPENROUTER_API_KEY="sk-or-x")[3]
+    s = H.ping(ds, post=post)
+    assert s["state"] == H.CONNECTED and s["model"] == "deepseek/deepseek-v4-flash:free"
+    assert sent == ["deepseek/deepseek-v4-flash-0731:free", "deepseek/deepseek-v4-flash:free"]
+    assert "deepseek/deepseek-v4-flash" not in sent                              # nunca la de pago
+    # Ya no se vuelve a elegir el retirado.
+    assert _providers(OPENROUTER_API_KEY="sk-or-x")[3]["model"] == "deepseek/deepseek-v4-flash:free"
+    # Si fallan todos, 🔴 con el motivo claro.
+    sent.clear()
+    assert H.ping(dict(ds, candidates=["a/b:free"]), post=lambda *a, **k: _Gone())["state"] == H.ERROR
+    # Un modelo puesto a mano no se cambia solo: se explica qué hacer.
+    manual = _providers(OPENROUTER_API_KEY="sk-or-x", OPENROUTER_MODEL="openai/gpt-oss-120b:free")[2]
+    r = H.chat(manual, [], post=lambda *a, **k: _Gone())
+    assert not r["ok"] and "retiró la versión gratis" in r["detail"] and "no lo pongas" in r["detail"]
+    assert "Cambiar el modelo" in r["detail"] and "openrouter/free" in r["detail"]
+    # La privacidad cerrada no es «modelo retirado»: no se cambia de modelo, se dice cómo abrirla.
+    assert not H._model_gone(json.dumps({"error": {"message": "No endpoints found matching your data policy"}}))
+
+
+def test_no_free_deepseek_today_is_said_without_calling():
+    H._FREE.update(t=time.time(), ids=["google/gemma-4-31b-it:free"])
+    ds = _providers(OPENROUTER_API_KEY="sk-or-x")[3]
+    assert ds["model"] == "(ninguno gratis ahora)" and "ningún modelo DeepSeek gratis" in ds["unavailable"]
+    s = H.ping(ds, post=lambda *a, **k: pytest.fail("no debe llamar"))
+    assert s["state"] == H.ERROR and "de pago necesita saldo" in s["detail"]
+
+
+def test_free_list_is_read_once_and_retried_after_a_failure(openrouter_free_list, monkeypatch):
+    for _ in range(3):
+        _providers(OPENROUTER_API_KEY="sk-or-x")
+    assert len(openrouter_free_list) == 1                                        # una lectura cada 6 h
+    H._FREE.update(t=0.0, ids=None)
+    monkeypatch.setattr(H, "_models_json", lambda get, timeout=8: (_ for _ in ()).throw(OSError("sin red")))
+    ds = _providers(OPENROUTER_API_KEY="sk-or-x")[3]
+    assert ds["model"] == "deepseek/deepseek-v4-flash:free" and not ds.get("auto_model")   # el de reserva
+    assert H.free_models(now=H._FREE["t"] + 60) is None                          # no insiste en cada recarga
+    monkeypatch.setattr(H, "_models_json", lambda get, timeout=8: {"data": [{"id": "deepseek/n:free", "created": 1,
+                                                                             "pricing": {"prompt": "0", "completion": "0"}}]})
+    assert H.free_models(now=H._FREE["t"] + H.FREE_LIST_RETRY + 1) == ["deepseek/n:free"]
+
+
+def test_router_says_which_free_model_answered_and_same_model_votes_once():
+    def post(url, headers, json, timeout):
+        served = "deepseek/deepseek-v4-flash-0731:free" if json["model"] == "openrouter/free" else json["model"]
+        return _Resp(body={"model": served, "choices": [{"message": {"content": "Hay que analizar.\nACCIÓN: analizar"}}]})
+
+    ps = [p for p in _providers(OPENROUTER_API_KEY="sk-or-x") if p["api_key"]]
+    out = {r["id"]: r for r in H.ask_all(ps, "x", DATA, post=post)}
+    assert out["openrouter"]["model"] == "openrouter/free"
+    assert out["openrouter"]["served_model"] == out["deepseek"]["served_model"] == "deepseek/deepseek-v4-flash-0731:free"
+    assert H.consensus(list(out.values())) == ("auto_analyze", 1, 2)             # mismo modelo: un voto
 
 
 def test_verify_checks_cited_data_and_references_against_the_context():
@@ -246,7 +347,7 @@ def test_rules_and_format_are_explicit():
                                       ("gsk_123", "GROQ_API_KEY"), ("AIzaSy", "GEMINI_API_KEY"), ("hola", None)])
 def test_key_prefix_detection(key, name):
     assert H.detect_key_name(key) == name
-    assert H.providers_for_key("OPENROUTER_API_KEY") == ["OpenRouter", "DeepSeek R1"]
+    assert H.providers_for_key("OPENROUTER_API_KEY") == ["OpenRouter", "DeepSeek"]
 
 
 def test_answers_arrive_as_they_finish():
@@ -288,7 +389,7 @@ def test_context_carries_more_interpretation():
     (429, "Rate limit exceeded: free-models-per-day", "límite gratuito"),
 ])
 def test_error_text_says_what_to_do_and_quotes_the_service(code, message, needle):
-    """Caso real: clave de OpenRouter pegada en la app y 🔴 en OpenRouter y DeepSeek R1 sin ver el motivo."""
+    """Caso real: clave de OpenRouter pegada en la app y 🔴 en OpenRouter y DeepSeek sin ver el motivo."""
     text = H._error_text(code, json.dumps({"error": {"message": message, "code": code}}))
     assert needle in text and "(%d)" % code in text and "mensaje del servicio" in text
 

@@ -1,7 +1,8 @@
 """🤖 Centro de conexiones IA: varias IA gratuitas a la vez, cada una con su semáforo.
 
 Proveedores con capa gratuita y API compatible con OpenAI (misma forma de llamada): NVIDIA
-build, Groq, OpenRouter (modelos ":free") y Google Gemini (AI Studio). Cada uno se activa
+build, Groq, OpenRouter (solo modelos gratis: su enrutador «openrouter/free» y un DeepSeek «:free»
+elegido de su lista pública) y Google Gemini (AI Studio). Cada uno se activa
 poniendo su clave en Streamlit → Settings → Secrets; sin clave queda ⚪ y la app sigue igual.
 
 Reglas para que las IA no decidan ni inventen:
@@ -30,14 +31,18 @@ PROVIDERS = [
     {"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1",
      "key": "GROQ_API_KEY", "model_key": "GROQ_MODEL", "default_model": "openai/gpt-oss-120b",
      "signup": "https://console.groq.com", "extra": {"reasoning_effort": "low"}},
+    # OpenRouter retira modelos «:free» sin aviso (10-oct-2026: gpt-oss-120b:free y deepseek-r1-0528:free
+    # responden 404 «unavailable for free» y proponen la versión de pago). «openrouter/free» es su
+    # enrutador oficial: elige en cada petición un modelo gratis de los que haya ese día.
     {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
-     "key": "OPENROUTER_API_KEY", "model_key": "OPENROUTER_MODEL", "default_model": "openai/gpt-oss-120b:free",
-     "signup": "https://openrouter.ai"},
-    # DeepSeek-R1 (MIT, 671B parámetros, 37B activos): no cabe en Streamlit Cloud, se usa gratis por
-    # OpenRouter con la MISMA clave OPENROUTER_API_KEY. Es un modelo de razonamiento: ver REASONING.
-    {"id": "deepseek", "name": "DeepSeek R1", "base_url": "https://openrouter.ai/api/v1",
-     "key": "OPENROUTER_API_KEY", "model_key": "DEEPSEEK_MODEL", "default_model": "deepseek/deepseek-r1-0528:free",
-     "signup": "https://openrouter.ai/deepseek/deepseek-r1-0528:free", "reasoning": True},
+     "key": "OPENROUTER_API_KEY", "model_key": "OPENROUTER_MODEL", "default_model": "openrouter/free",
+     "signup": "https://openrouter.ai/openrouter/free"},
+    # DeepSeek (R1 y sucesores, MIT): no caben en Streamlit Cloud, se usan gratis por OpenRouter con la
+    # MISMA clave OPENROUTER_API_KEY. El modelo se elige solo de la lista pública de OpenRouter (precio 0
+    # y «:free»; R1 primero si vuelve a ser gratis); el de reserva solo se usa si la lista no se puede leer.
+    {"id": "deepseek", "name": "DeepSeek", "base_url": "https://openrouter.ai/api/v1",
+     "key": "OPENROUTER_API_KEY", "model_key": "DEEPSEEK_MODEL", "default_model": "deepseek/deepseek-v4-flash:free",
+     "signup": "https://openrouter.ai/models?q=deepseek", "free_family": "deepseek/"},
     {"id": "gemini", "name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
      "key": "GEMINI_API_KEY", "model_key": "GEMINI_MODEL", "default_model": "gemini-3.5-flash",
      "signup": "https://aistudio.google.com", "extra": {"reasoning_effort": "low"}},
@@ -52,14 +57,88 @@ ACTIONS = {"hazlo_por_mi": "auto", "otro_archivo": "other_filter", "analizar": "
 
 # ---------------------------------------------------------------- configuración
 
-def configured(get_secret):
-    """Proveedores con su clave y modelo resueltos. `get_secret(nombre)` -> str o None."""
+def configured(get_secret, get=None):
+    """Proveedores con su clave y modelo resueltos. `get_secret(nombre)` -> str o None.
+    Con `free_family` y sin modelo puesto a mano, el modelo sale de la lista de gratis de OpenRouter."""
     out = []
     for p in PROVIDERS:
         key = (get_secret(p["key"]) or "").strip()
-        model = (get_secret(p["model_key"]) or "").strip() or p["default_model"]
-        out.append(dict(p, api_key=key, model=model))
+        chosen = (get_secret(p["model_key"]) or "").strip()
+        q = dict(p, api_key=key, model=chosen or p["default_model"])
+        if p.get("free_family") and key and not chosen:
+            cands = free_candidates(p["free_family"], get=get)
+            if cands:
+                q.update(model=cands[0], candidates=cands[:3], auto_model=True)
+            elif cands is not None:                    # lista leída y ninguno gratis
+                q["model"] = "(ninguno gratis ahora)"
+                q["unavailable"] = ("OpenRouter no ofrece ahora ningún modelo %s gratis (la versión de pago necesita "
+                                    "saldo). Las demás IA siguen; la app vuelve a mirar la lista cada %d h"
+                                    % (p["name"], FREE_LIST_TTL // 3600))
+        out.append(q)
     return out
+
+
+# ---------------------------------------------------------------- modelos gratis de OpenRouter
+
+# Lista pública (sin clave): {"data": [{"id", "created", "pricing": {"prompt": "0", "completion": "0"}}…]}.
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+FREE_LIST_TTL = 6 * 3600          # se vuelve a leer cada 6 h (los gratis cambian a menudo)
+FREE_LIST_RETRY = 600             # si falló, se reintenta a los 10 min
+_FREE = {"t": 0.0, "ids": None, "bad": set()}
+
+
+def _models_json(get, timeout=8):
+    r = get(OPENROUTER_MODELS_URL, timeout=timeout)
+    return r.json() if getattr(r, "status_code", 0) == 200 else None
+
+
+def free_ids(data):
+    """IDs gratis de verdad: precio 0 de entrada y de salida y terminados en «:free». Más nuevos primero."""
+    out = []
+    for m in (data or {}).get("data") or []:
+        mid, pr = str(m.get("id") or ""), m.get("pricing") or {}
+        try:
+            free = float(pr.get("prompt", 1)) == 0 and float(pr.get("completion", 1)) == 0
+        except (TypeError, ValueError):
+            free = False
+        if free and mid.endswith(":free"):
+            out.append((int(m.get("created") or 0), mid))
+    return [mid for _, mid in sorted(out, reverse=True)]
+
+
+def free_models(get=None, now=None):
+    """Gratis de OpenRouter ahora (guardado 6 h para todas las sesiones); None si no se pudo leer."""
+    now = time.time() if now is None else now
+    ttl = FREE_LIST_TTL if _FREE["ids"] is not None else FREE_LIST_RETRY
+    if _FREE["t"] and now - _FREE["t"] < ttl:
+        return _FREE["ids"]
+    if get is None:
+        import requests
+        get = requests.get
+    try:
+        data = _models_json(get)
+        ids = free_ids(data) if isinstance(data, dict) and data.get("data") else None
+    except Exception:                              # red, JSON roto…: se usa el modelo de reserva
+        ids = None
+    _FREE.update(t=now, ids=ids)
+    if ids is not None:
+        _FREE["bad"] = set()                       # lista nueva: un modelo que volvió a ser gratis vale otra vez
+    return ids
+
+
+def free_candidates(family, get=None):
+    """Gratis de una familia («deepseek/»), R1 primero y luego del más nuevo; sin los que ya fallaron."""
+    ids = free_models(get)
+    if ids is None:
+        return None
+    fam = [i for i in ids if i.startswith(family) and i not in _FREE["bad"]]
+    return sorted(fam, key=lambda i: 0 if "-r1" in i else 1)        # orden estable: dentro, más nuevo primero
+
+
+def _model_gone(body):
+    """El servicio dice que ese modelo ya no existe o ya no es gratis (no si es la privacidad)."""
+    low = _provider_message(body).lower()
+    return "data policy" not in low and any(k in low for k in MODEL_GONE)
 
 
 def initial_status(providers):
@@ -86,6 +165,11 @@ def _provider_message(body):
     return msg[:180]
 
 
+# Mensajes de «ese modelo ya no existe o ya no es gratis» (con un modelo elegido solo, se pasa al siguiente).
+MODEL_GONE = ("unavailable for free", "paid version", "not a valid model", "model not found", "does not exist",
+              "no endpoints found", "unknown model", "not found for api")
+CHANGE_MODEL = "«Detalle de cada IA» → «Cambiar el modelo»"
+
 # Qué hacer según el mensaje del servicio (se busca en minúsculas; el primero que encaja gana).
 # OpenRouter devuelve 404 «No endpoints found matching your data policy» cuando su configuración de
 # privacidad no permite los modelos gratuitos (sus proveedores pueden guardar las preguntas).
@@ -94,12 +178,18 @@ ERROR_ADVICE = [
      "OpenRouter bloquea los modelos gratis por tu configuración de privacidad. Arreglo: entra en "
      "openrouter.ai/settings/privacy y permite los modelos gratuitos (pueden guardar las preguntas; la app "
      "solo envía números públicos del telescopio)"),
+    # 10-oct-2026: «This model is unavailable for free. The paid version is available now - use this slug
+    # instead: openai/gpt-oss-120b». El nombre que propone es DE PAGO: no se cambia a él nunca.
+    (("unavailable for free", "paid version"),
+     "OpenRouter retiró la versión gratis de este modelo. El nombre que propone (sin «:free») es de pago y "
+     "necesita saldo: no lo pongas. Arreglo: en %s deja el campo vacío (la app usa uno gratis de hoy) o escribe "
+     "openrouter/free" % CHANGE_MODEL),
     (("no auth credentials", "user not found", "invalid api key", "incorrect api key", "api key not valid",
       "invalid_api_key", "unauthorized", "authentication"),
      "clave no válida: vuelve a copiarla entera desde la web del servicio"),
     (("not a valid model", "model not found", "does not exist", "no endpoints found", "unknown model",
       "not found for api"),
-     "ese modelo ya no está disponible: cambia el modelo en Secrets (por ejemplo DEEPSEEK_MODEL u OPENROUTER_MODEL)"),
+     "ese modelo ya no está disponible: cámbialo en %s (vacío = el de la app) o en Secrets" % CHANGE_MODEL),
     (("rate limit", "rate-limit", "per-day", "quota", "too many requests"),
      "límite gratuito alcanzado: espera unos minutos (o hasta mañana si es el límite diario)"),
     (("credits", "insufficient", "payment"),
@@ -116,7 +206,7 @@ def _error_text(code, body=""):
         if code in (401, 403):
             advice = "clave no válida o sin permiso"
         elif code == 404:
-            advice = "modelo no encontrado: cambia el modelo en Secrets"
+            advice = "modelo no encontrado: cámbialo en %s" % CHANGE_MODEL
         elif code == 429:
             advice = "límite gratuito alcanzado: espera un minuto"
         elif code == 402:
@@ -153,43 +243,58 @@ def _as_user_only(messages):
 
 
 def chat(provider, messages, max_tokens=1200, timeout=60, post=None):
-    """Una petición de chat. Devuelve dict(ok, text, detail, latency_ms)."""
+    """Una petición de chat. Devuelve dict(ok, text, detail, latency_ms, model, served_model).
+    `model` es el pedido; `served_model`, el que contestó según el servicio (con openrouter/free es el
+    modelo gratis que eligió el enrutador)."""
     if post is None:
         import requests
         post = requests.post
+    model = provider.get("model")
     if not provider.get("api_key"):
-        return {"ok": False, "text": "", "detail": "sin clave", "latency_ms": None}
+        return {"ok": False, "text": "", "detail": "sin clave", "latency_ms": None, "model": model}
+    if provider.get("unavailable"):
+        return {"ok": False, "text": "", "detail": provider["unavailable"], "latency_ms": None, "model": model}
     url = provider["base_url"].rstrip("/") + "/chat/completions"
-    temperature = 0.2
-    if is_reasoning(provider):
-        messages = _as_user_only(messages)
-        temperature = REASONING["temperature"]
-        if max_tokens > 64:                      # la prueba de conexión sigue siendo mínima
-            max_tokens = max(int(max_tokens), REASONING["min_tokens"])
-            timeout = max(timeout, REASONING["timeout"])
-    payload = {"model": provider["model"], "messages": messages, "max_tokens": int(max_tokens), "temperature": temperature}
-    # Razonamiento corto (más rápido y deja tokens para la respuesta), solo con el modelo por
-    # defecto: otro modelo puesto en Secrets podría no aceptar la opción.
-    extra = provider.get("extra") if provider["model"] == provider.get("default_model") else None
     headers = {"Authorization": "Bearer %s" % provider["api_key"], "Content-Type": "application/json"}
     t0 = time.monotonic()
-    try:
-        r = post(url, headers=headers, json=dict(payload, **(extra or {})), timeout=timeout)
-        if extra and getattr(r, "status_code", 0) == 400:
-            r = post(url, headers=headers, json=payload, timeout=timeout)    # sin la opción
-    except Exception as exc:                       # red, tiempo agotado, DNS…
-        name = type(exc).__name__
-        detail = "no responde (tiempo agotado)" if "Timeout" in name else "sin conexión con el servicio (%s)" % name
-        return {"ok": False, "text": "", "detail": detail, "latency_ms": None}
+    # Modelo elegido de la lista de gratis: si el servicio dice que ya no existe o ya no es gratis, se
+    # prueba el siguiente gratis (nunca la versión de pago que propone) y no se vuelve a usar.
+    for i, model in enumerate(provider.get("candidates") or [model]):
+        p = dict(provider, model=model)
+        msgs, temperature, tokens, wait = messages, 0.2, int(max_tokens), timeout
+        if is_reasoning(p):
+            msgs, temperature = _as_user_only(messages), REASONING["temperature"]
+            if max_tokens > 64:                  # la prueba de conexión sigue siendo mínima
+                tokens, wait = max(tokens, REASONING["min_tokens"]), max(timeout, REASONING["timeout"])
+        payload = {"model": model, "messages": msgs, "max_tokens": tokens, "temperature": temperature}
+        # Razonamiento corto (más rápido y deja tokens para la respuesta), solo con el modelo por
+        # defecto: otro modelo puesto en Secrets podría no aceptar la opción.
+        extra = provider.get("extra") if model == provider.get("default_model") else None
+        try:
+            r = post(url, headers=headers, json=dict(payload, **(extra or {})), timeout=wait)
+            if extra and getattr(r, "status_code", 0) == 400:
+                r = post(url, headers=headers, json=payload, timeout=wait)    # sin la opción
+        except Exception as exc:                   # red, tiempo agotado, DNS…
+            name = type(exc).__name__
+            detail = "no responde (tiempo agotado)" if "Timeout" in name else "sin conexión con el servicio (%s)" % name
+            return {"ok": False, "text": "", "detail": detail, "latency_ms": None, "model": model}
+        code, body = getattr(r, "status_code", 0), getattr(r, "text", "")
+        if code != 200 and provider.get("auto_model") and _model_gone(body):
+            _FREE["bad"].add(model)
+            if i + 1 < len(provider["candidates"]):
+                continue
+        break
     ms = int(1000 * (time.monotonic() - t0))
-    if getattr(r, "status_code", 0) != 200:
-        return {"ok": False, "text": "", "detail": _error_text(getattr(r, "status_code", 0), getattr(r, "text", "")),
-                "latency_ms": ms}
+    if code != 200:
+        return {"ok": False, "text": "", "detail": _error_text(code, body), "latency_ms": ms, "model": model}
     try:
-        text = r.json()["choices"][0]["message"].get("content") or ""
+        data = r.json()
+        text = data["choices"][0]["message"].get("content") or ""
     except Exception:
-        return {"ok": False, "text": "", "detail": "respuesta con formato desconocido", "latency_ms": ms}
-    return {"ok": True, "text": strip_reasoning(text), "detail": "", "latency_ms": ms}
+        return {"ok": False, "text": "", "detail": "respuesta con formato desconocido", "latency_ms": ms, "model": model}
+    served = data.get("model") if isinstance(data.get("model"), str) else None
+    return {"ok": True, "text": strip_reasoning(text), "detail": "", "latency_ms": ms, "model": model,
+            "served_model": served}
 
 
 def strip_reasoning(text):
@@ -208,8 +313,8 @@ def ping(provider, post=None):
     r = chat(provider, [{"role": "user", "content": "Responde solo: OK"}], max_tokens=16, timeout=15, post=post)
     # Con HTTP 200 está conectada aunque un modelo de razonamiento no llegue a escribir "OK".
     ok = r["ok"]
-    return {"state": CONNECTED if ok else ERROR, "detail": "" if ok else r["detail"], "model": provider["model"],
-            "latency_ms": r["latency_ms"]}
+    return {"state": CONNECTED if ok else ERROR, "detail": "" if ok else r["detail"],
+            "model": r.get("model") or provider["model"], "latency_ms": r["latency_ms"]}
 
 
 def ping_all(providers, post=None):
@@ -246,7 +351,11 @@ def status_detail(provider, s):
     state = s.get("state", NO_KEY)
     parts = ["%s **%s**" % (LIGHT[state], provider["name"]), STATE_TEXT[state]]
     if state != NO_KEY:
-        parts.append("`%s`" % provider["model"])
+        parts.append("`%s`" % s.get("model", provider["model"]))
+        if provider.get("auto_model"):
+            parts.append("gratis hoy, elegido solo")
+        elif provider["model"] == "openrouter/free":
+            parts.append("elige un modelo gratis en cada pregunta")
     if state == CONNECTED and s.get("latency_ms") is not None:
         parts.append("%.1f s" % (s["latency_ms"] / 1000.0))
     if state == ERROR and s.get("detail"):
@@ -265,8 +374,9 @@ def _result(p, a, question, context):
         a = dict(a, ok=False, detail="respuesta vacía (el modelo no terminó de responder)")
     text, action = split_action(a["text"]) if a["ok"] else ("", None)
     issues = verify(text, context + "\n" + question) if a["ok"] else []
-    return {"id": p["id"], "name": p["name"], "model": p["model"], "ok": a["ok"], "text": text,
-            "action": action, "issues": issues, "detail": a["detail"], "latency_ms": a["latency_ms"]}
+    return {"id": p["id"], "name": p["name"], "model": a.get("model") or p["model"], "ok": a["ok"], "text": text,
+            "action": action, "issues": issues, "detail": a["detail"], "latency_ms": a["latency_ms"],
+            "served_model": a.get("served_model")}
 
 
 def ask_iter(providers, question, context, post=None):
@@ -517,9 +627,20 @@ def split_action(text):
     return "\n".join(keep).strip(), action
 
 
+def same_model_key(r):
+    """Quién respondió de verdad: el modelo que dice el servicio (sin «:free»), o la IA si no lo dice."""
+    served = str(r.get("served_model") or "").strip().lower()
+    return served[:-5] if served.endswith(":free") else (served or "id:" + str(r["id"]))
+
+
 def consensus(results):
-    """Acción propuesta por la mayoría de las IA que respondieron sin problemas de verificación."""
-    votes = [r["action"] for r in results if r["ok"] and not r["issues"] and r["action"]]
+    """Acción propuesta por la mayoría de las IA que respondieron sin problemas de verificación. Si dos
+    respuestas vienen del mismo modelo (openrouter/free puede elegir el mismo que otra IA), vota una vez."""
+    votes, seen = [], set()
+    for r in results:
+        if r["ok"] and not r["issues"] and r["action"] and same_model_key(r) not in seen:
+            seen.add(same_model_key(r))
+            votes.append(r["action"])
     if not votes:
         return None, 0, len([r for r in results if r["ok"]])
     best = max(set(votes), key=votes.count)

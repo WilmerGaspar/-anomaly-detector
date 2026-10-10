@@ -54,7 +54,7 @@ def test_without_keys_everything_is_white_and_nothing_is_sent(monkeypatch):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at)
-    assert all("⚪ %s" % n in text for n in ("NVIDIA", "Groq", "OpenRouter", "DeepSeek R1", "Gemini"))
+    assert all("⚪ %s" % n in text for n in ("NVIDIA", "Groq", "OpenRouter", "DeepSeek", "Gemini"))
     assert not [b for b in at.main.button if b.key == "ai_ask"] and calls == []
 
 
@@ -68,9 +68,9 @@ def test_lights_council_and_accepted_proposal(monkeypatch, fake_mast):  # noqa: 
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     # Al abrir se prueba cada conexión una vez: dos 🟢, la clave mala 🔴 con el motivo (también
-    # en DeepSeek R1, que usa la misma clave de OpenRouter), Gemini ⚪.
+    # en DeepSeek, que usa la misma clave de OpenRouter), Gemini ⚪.
     text = _texts(at)
-    assert all(c in text for c in ("🟢 NVIDIA", "🟢 Groq", "🔴 OpenRouter", "🔴 DeepSeek R1", "⚪ Gemini"))
+    assert all(c in text for c in ("🟢 NVIDIA", "🟢 Groq", "🔴 OpenRouter", "🔴 DeepSeek", "⚪ Gemini"))
     assert "clave no válida o sin permiso (401)" in text
     assert len(calls) == 4
     at.run()
@@ -139,7 +139,7 @@ def test_paste_a_key_in_the_app(monkeypatch):
 
 def test_red_light_shows_the_reason_and_model_can_change_in_the_app(monkeypatch):
     """OpenRouter con la privacidad cerrada: 404 «data policy». El motivo y el arreglo se ven bajo el
-    semáforo (una línea para OpenRouter y DeepSeek R1) y el modelo se puede cambiar sin Secrets."""
+    semáforo (una línea para OpenRouter y DeepSeek) y el modelo se puede cambiar sin Secrets."""
     for k in list(KEYS) + ["GEMINI_API_KEY"]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-SECRETO-4")
@@ -160,10 +160,52 @@ def test_red_light_shows_the_reason_and_model_can_change_in_the_app(monkeypatch)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     warns = [w.value for w in at.warning]
-    assert any("OpenRouter y DeepSeek R1" in w and "openrouter.ai/settings/privacy" in w for w in warns), warns
-    box = next(t for t in at.text_input if t.label == "DeepSeek R1")
+    assert any("OpenRouter y DeepSeek" in w and "openrouter.ai/settings/privacy" in w for w in warns), warns
+    box = next(t for t in at.text_input if t.label == "DeepSeek")
     box.input("deepseek/deepseek-r1:free")
     next(b for b in at.button if "Usar estos modelos" in str(b.label)).click().run()
     at.run()
     assert "deepseek/deepseek-r1:free" in seen                      # la prueba usa el modelo nuevo
     assert "SECRETO" not in " ".join(str(m.value) for m in at.markdown) + " ".join(warns)
+
+
+def test_retired_free_models_screenshot_case(monkeypatch):
+    """Caso real (captura del 10-oct-2026): con los modelos de antes, OpenRouter y DeepSeek R1 en 🔴 por
+    «This model is unavailable for free. The paid version is available now - use this slug instead: …».
+    Ahora: OpenRouter usa openrouter/free, DeepSeek uno gratis de la lista (si el primero ya no lo es,
+    el siguiente) y nunca se pide la versión de pago."""
+    for k in list(KEYS) + ["GEMINI_API_KEY", "OPENROUTER_MODEL", "DEEPSEEK_MODEL"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-SECRETO-5")
+    seen = []
+
+    def gone(paid):
+        r = _Resp(404)
+        r.text = json.dumps({"error": {"message": "This model is unavailable for free. The paid version is available "
+                                                  "now - use this slug instead: %s" % paid, "code": 404}})
+        return r
+
+    def post(url, headers=None, json=None, timeout=None, **kw):
+        seen.append(json["model"])
+        if json["model"] in ("openai/gpt-oss-120b:free", "deepseek/deepseek-v4-flash-0731:free"):
+            return gone(json["model"][:-5])
+        return _Resp(200, "OK")
+
+    monkeypatch.setattr(requests, "post", post)
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
+    at.run()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    text = _texts(at) + " ".join(str(m.value) for m in at.markdown)
+    assert "🟢 OpenRouter" in text and "🟢 DeepSeek" in text and not at.warning
+    assert "openrouter/free" in seen and "deepseek/deepseek-v4-flash:free" in seen
+    assert not [m for m in seen if not (m.endswith(":free") or m == "openrouter/free")]     # nada de pago
+    # Si la persona pone a mano el modelo retirado, el 🔴 explica qué hacer (no «ve a Secrets»).
+    box = next(t for t in at.text_input if t.label == "OpenRouter")
+    box.input("openai/gpt-oss-120b:free")
+    next(b for b in at.button if "Usar estos modelos" in str(b.label)).click().run()
+    at.run()
+    warns = " ".join(w.value for w in at.warning)
+    assert "retiró la versión gratis" in warns and "Cambiar el modelo" in warns and "openrouter/free" in warns
+    assert "SECRETO" not in warns + " ".join(str(m.value) for m in at.markdown)

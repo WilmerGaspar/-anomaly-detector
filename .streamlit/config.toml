@@ -1,10 +1,11 @@
 [theme]
-base = "dark"
-primaryColor = "#33ff66"
-backgroundColor = "#020803"
-secondaryBackgroundColor = "#07140a"
-textColor = "#b7ffc2"
-font = "monospace"
+# Aspecto Windows 2000 (el resto, en theme.py): gris de ventana, texto negro, campos blancos, azul marino.
+base = "light"
+primaryColor = "#0a246a"
+backgroundColor = "#d4d0c8"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#000000"
+font = "sans serif"
 
 [server]
 # Streamlit recibe la subida en memoria (~2x el archivo) antes de que la app la pase a disco.

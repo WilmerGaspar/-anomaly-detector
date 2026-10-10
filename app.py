@@ -32,14 +32,9 @@ def _tune_malloc():
 
 _tune_malloc()
 st.set_page_config(page_title="CMS-80", page_icon="\u25a0", layout="wide")
-st.markdown("""<style>
-.stApp { background:#020803; color:#b7ffc2; }
-.stButton>button, .stDownloadButton>button { background:#031108 !important; color:#33ff66 !important; border:1px solid #33ff66 !important; border-radius:0 !important; }
-.stButton>button:disabled { color:#2a5a35 !important; border-color:#2a5a35 !important; }
-[data-testid="stMetricValue"] { color:#33ff66 !important; }
-[data-testid="stSidebar"] { background:#010604 !important; }
-.cms-prov { border-left:2px solid #33ff66; padding:0.3rem 0.8rem; margin:0.4rem 0; font-size:0.92rem; }
-</style>""", unsafe_allow_html=True)
+import theme  # noqa: E402  (aspecto Windows 2000: ventanas, barra de tareas y consola de IA)
+
+theme.apply()
 
 from mast_client import CURATED, MAST_ACK, MAX_CLOUD_MB, NOTES  # noqa: E402
 
@@ -89,8 +84,8 @@ def _render_guide():
                        "has_search": bool(ss.get("search")), "has_prods": ss.get("prods") is not None,
                        "field_loaded": ss.get("field_name") if field_ok else None, "card": card, "level": level})
     # En la pantalla principal, arriba (antes estaba en la barra lateral, poco visible).
-    with st.container(border=True):
-        st.markdown("### 🧠 Guía")
+    with st.container(border=True, key="win_guide"):
+        st.subheader("🧠 Guía", anchor="guia")
         left, right = st.columns([3, 2], gap="medium")
         with left:
             for note in ss.get("guide_note") or []:
@@ -118,6 +113,7 @@ def _render_guide():
                     st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
             st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
             AI.render_controls(q, card, msg, log, gate)
+        theme.taskbar(ss.get("ai_tray") or [], theme.tasks_for(field_ok))      # fija abajo, con el semáforo
         # Respuestas de las IA a lo ancho del recuadro, en vivo según llegan.
         AI.render_council(msg, _guide_action)
 
@@ -559,7 +555,7 @@ def _autopilot(kind, obj, mission, radius):
 
 
 # ================================================================ 1. FUENTE DE DATOS
-st.markdown("### 1. Fuente de datos")
+st.subheader("1. Fuente de datos", anchor="fuente")
 source_kind = st.radio("Origen", ["Archivo MAST (STScI)", "Archivo propio", "URL directa"], horizontal=True, key="source_kind")
 
 if source_kind == "Archivo MAST (STScI)":
@@ -716,7 +712,7 @@ if not raw:
     st.info("Elige un archivo arriba para ver la imagen.")
     st.stop()
 
-st.markdown("### 2. Imagen y región de estudio")
+st.subheader("2. Imagen y región de estudio", anchor="region")
 st.success("Cargado: %s · %.1f MB · origen: %s" % (name, raw_size / 1048576, source.get("archive", "—")))
 
 hdu_index = None
@@ -822,7 +818,7 @@ if not meta.get("is_fits"):
     st.warning("Imagen no científica (%s): el estiramiento y la compresión alteran la estadística. Usa FITS para conclusiones." % meta.get("format"))
 
 # ================================================================ 3. SONIFICACION
-st.markdown("### 3. Escuchar la región")
+st.subheader("3. Escuchar la región", anchor="escuchar")
 st.caption("Sonificación, no sonido real: el espacio casi no transmite sonido. La región se recorre de izquierda a "
            "derecha en 8 s; el tono sigue el brillo medio de cada columna y el volumen su contraste. Compara la región "
            "real con un subrogado IAAFT, que tiene el mismo espectro e histograma pero la estructura espacial barajada: "
@@ -841,7 +837,7 @@ if aud and aud[2] == pkey + (x0, y0, side):
     a2.audio(aud[1], sample_rate=22050)
 
 # ================================================================ 4. ANALISIS
-st.markdown("### 4. Analizar la región")
+st.subheader("4. Analizar la región", anchor="analizar")
 run_now = st.button("Analizar", type="primary")
 if st.session_state.pop("auto_analyze", False):
     run_now = True

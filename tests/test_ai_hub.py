@@ -250,7 +250,9 @@ def test_openrouter_defaults_are_free_and_never_the_paid_slug():
     """Caso real (10-oct-2026): «This model is unavailable for free. The paid version is available now - use
     this slug instead: openai/gpt-oss-120b» (y lo mismo con deepseek-r1-0528). La app solo usa gratis."""
     ps = {p["id"]: p for p in _providers(OPENROUTER_API_KEY="sk-or-x")}
-    assert ps["openrouter"]["model"] == "openrouter/free"                        # enrutador oficial gratis
+    # El mejor gratis de la lista (el único que no es DeepSeek) y el enrutador oficial de último recurso.
+    assert ps["openrouter"]["model"] == "google/gemma-4-31b-it:free" and ps["openrouter"]["auto_model"]
+    assert ps["openrouter"]["candidates"] == ["google/gemma-4-31b-it:free", "openrouter/free"]
     ds = ps["deepseek"]
     assert ds["auto_model"] and ds["model"] == "deepseek/deepseek-v4-flash-0731:free" and not H.is_reasoning(ds)
     assert ds["candidates"] == ["deepseek/deepseek-v4-flash-0731:free", "deepseek/deepseek-v4-flash:free"]
@@ -328,7 +330,7 @@ def test_router_says_which_free_model_answered_and_same_model_votes_once():
         served = "deepseek/deepseek-v4-flash-0731:free" if json["model"] == "openrouter/free" else json["model"]
         return _Resp(body={"model": served, "choices": [{"message": {"content": "Hay que analizar.\nACCIÓN: analizar"}}]})
 
-    ps = [p for p in _providers(OPENROUTER_API_KEY="sk-or-x") if p["api_key"]]
+    ps = [p for p in _providers(OPENROUTER_API_KEY="sk-or-x", OPENROUTER_MODEL="openrouter/free") if p["api_key"]]
     out = {r["id"]: r for r in H.ask_all(ps, "x", DATA, post=post)}
     assert out["openrouter"]["model"] == "openrouter/free"
     assert out["openrouter"]["served_model"] == out["deepseek"]["served_model"] == "deepseek/deepseek-v4-flash-0731:free"
@@ -405,3 +407,67 @@ def test_error_text_says_what_to_do_and_quotes_the_service(code, message, needle
 def test_error_text_never_repeats_keys_or_raw_json():
     assert "sk-or-v1" not in H._error_text(400, "falló con sk-or-v1-abcdef123456")
     assert H._error_text(401, json.dumps({"choices": []})) == "clave no válida o sin permiso (401)"
+
+
+def _free(mid, created=1, description="", modalities=None):
+    m = {"id": mid, "created": created, "description": description, "pricing": {"prompt": "0", "completion": "0"}}
+    if modalities:
+        m["architecture"] = {"input_modalities": modalities[0], "output_modalities": modalities[1]}
+    return m
+
+
+@pytest.mark.parametrize("mid,desc,size", [
+    ("google/gemma-4-31b-it:free", "", 31.0), ("openai/gpt-oss-120b:free", "", 120.0),
+    ("liquid/lfm-2.5-2.6b:free", "", 2.6), ("nvidia/nemotron-3.5-lightning-30b-a3b:free", "", 30.0),   # a3b: activos
+    ("ejemplo/sin-tamano:free", "MoE with 284B total parameters and 13B activated parameters", 284.0),
+    ("ejemplo/otro:free", "A 2.6 billion parameter model", 2.6), ("ejemplo/grande:free", "1T parameters", 1000.0),
+    ("ejemplo/nada:free", "Fast and helpful.", None)])
+def test_model_size_from_name_or_description(mid, desc, size):
+    assert H.model_size_b(mid, desc) == size
+
+
+def test_best_free_model_of_the_day_not_a_random_tiny_one(monkeypatch):
+    """Caso real (captura del 10-oct-2026): openrouter/free contestó con liquid/lfm-2.5-2.6b (2,6B) y se
+    inventó [mision_JWST] y [objeto_NGC_7023]. Ahora se elige el más capaz de la lista de gratis."""
+    data = {"data": [
+        _free("liquid/lfm-2.5-2.6b:free", 9), _free("google/gemma-4-31b-it:free", 5),
+        _free("nvidia/nemotron-3.5-lightning-30b-a3b:free", 6), _free("ejemplo/misterio:free", 8),
+        _free("ejemplo/laguna-code-70b:free", 7), _free("meta/llama-guard-9-12b:free", 4),
+        _free("ejemplo/imagen-90b:free", 3, modalities=(["text"], ["image"])),
+        _free("deepseek/deepseek-v9-400b:free", 2), _free("ejemplo/grande-sin-nombre:free", 1, "with 120B total parameters")]}
+    monkeypatch.setattr(H, "_models_json", lambda get, timeout=8: data)
+    order = [e["id"] for e in H.best_free(exclude=["deepseek/"])]
+    assert order == ["ejemplo/grande-sin-nombre:free", "google/gemma-4-31b-it:free",
+                     "nvidia/nemotron-3.5-lightning-30b-a3b:free",          # ≥ 20B, de mayor a menor
+                     "ejemplo/laguna-code-70b:free",                        # de programación: al final del grupo
+                     "ejemplo/misterio:free",                               # no dice su tamaño
+                     "liquid/lfm-2.5-2.6b:free"]                            # pequeño: el último
+    # Ni clasificadores (guard), ni modelos que no escriben texto, ni los de DeepSeek (ya tienen su IA).
+    op = _providers(OPENROUTER_API_KEY="sk-or-x")[2]
+    assert op["candidates"] == ["ejemplo/grande-sin-nombre:free", "google/gemma-4-31b-it:free",
+                                "nvidia/nemotron-3.5-lightning-30b-a3b:free", "openrouter/free"]
+    assert op["size_b"] == 120.0
+    st = H.ping(op, post=lambda *a, **k: _Resp(content="OK"))
+    assert "el mejor gratis de hoy (≈120B parámetros)" in H.status_detail(op, st)
+    # Un modelo puesto a mano manda: no se elige nada.
+    assert _providers(OPENROUTER_API_KEY="sk-or-x", OPENROUTER_MODEL="mi/modelo:free")[2]["model"] == "mi/modelo:free"
+
+
+@pytest.mark.parametrize("code,message,tries,retired", [
+    (403, "This model is only available for agent tools", 2, True),
+    (429, "google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly", 2, False),
+    (429, "Rate limit exceeded: free-models-per-day", 1, False),      # límite de la cuenta: vale para todos
+    (401, "No auth credentials found", 1, False)])
+def test_when_to_try_the_next_free_model(code, message, tries, retired):
+    sent = []
+
+    class _Bad:
+        status_code, text = code, json.dumps({"error": {"message": message}})
+
+    def post(url, headers, json, timeout):
+        sent.append(json["model"])
+        return _Bad() if len(sent) == 1 else _Resp(content="OK")
+
+    op = _providers(OPENROUTER_API_KEY="sk-or-x")[2]
+    assert H.ping(op, post=post)["state"] == (H.CONNECTED if tries == 2 else H.ERROR)
+    assert len(sent) == tries and (op["candidates"][0] in H._FREE["bad"]) == retired

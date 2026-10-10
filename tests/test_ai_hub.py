@@ -294,11 +294,19 @@ def test_retired_free_model_falls_to_the_next_free_one():
 
 
 def test_no_free_deepseek_today_is_said_without_calling():
+    """Caso real (10-oct-2026): OpenRouter ya no tiene ningún DeepSeek gratis. No es un error que la persona
+    pueda arreglar: 💤 en pausa (no 🔴), sin llamada y sin tarjeta roja al preguntar."""
     H._FREE.update(t=time.time(), ids=["google/gemma-4-31b-it:free"])
-    ds = _providers(OPENROUTER_API_KEY="sk-or-x")[3]
+    ps = _providers(OPENROUTER_API_KEY="sk-or-x")
+    ds = ps[3]
     assert ds["model"] == "(ninguno gratis ahora)" and "ningún modelo DeepSeek gratis" in ds["unavailable"]
+    assert not H.usable(ds) and H.usable(ps[2])
     s = H.ping(ds, post=lambda *a, **k: pytest.fail("no debe llamar"))
-    assert s["state"] == H.ERROR and "de pago necesita saldo" in s["detail"]
+    assert s["state"] == H.RESTING and "No es un fallo" in s["detail"]
+    assert H.initial_status(ps)["deepseek"]["state"] == H.RESTING and "💤 DeepSeek" in H.light_line(ps, H.initial_status(ps))
+    assert "en pausa" in H.status_detail(ds, s) and "No es un fallo" in H.status_detail(ds, s)
+    asked = [r["id"] for r in H.ask_iter(ps, "x", DATA, post=lambda *a, **k: _Resp(content="ok"))]
+    assert asked == ["openrouter"]                                              # DeepSeek no se consulta
 
 
 def test_free_list_is_read_once_and_retried_after_a_failure(openrouter_free_list, monkeypatch):

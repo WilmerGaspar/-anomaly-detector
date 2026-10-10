@@ -209,3 +209,36 @@ def test_retired_free_models_screenshot_case(monkeypatch):
     warns = " ".join(w.value for w in at.warning)
     assert "retiró la versión gratis" in warns and "Cambiar el modelo" in warns and "openrouter/free" in warns
     assert "SECRETO" not in warns + " ".join(str(m.value) for m in at.markdown)
+
+
+def test_no_free_deepseek_today_is_a_calm_pause_not_a_red_error(monkeypatch):
+    """Caso real (captura del 10-oct-2026, tras el cambio): OpenRouter 🟢 y DeepSeek 🔴 con un recuadro de
+    aviso aunque no había nada que arreglar (OpenRouter retiró todos los DeepSeek gratis). Ahora: 💤 y una
+    línea tranquila; no se prueba ni se pregunta a DeepSeek y el botón cuenta solo las IA disponibles."""
+    import ai_hub
+    from conftest import SAMPLE_MODELS
+    for k in list(KEYS) + ["GEMINI_API_KEY", "OPENROUTER_MODEL", "DEEPSEEK_MODEL"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-SECRETO-6")
+    no_deepseek = {"data": [m for m in SAMPLE_MODELS["data"] if not m["id"].startswith("deepseek/")]}
+    monkeypatch.setattr(ai_hub, "_models_json", lambda get, timeout=8: no_deepseek)
+    seen = []
+
+    def post(url, headers=None, json=None, timeout=None, **kw):
+        seen.append(json["model"])
+        return _Resp(200, "OK" if json["max_tokens"] <= 16 else "Hay que analizar.\nACCIÓN: hazlo_por_mi")
+
+    monkeypatch.setattr(requests, "post", post)
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    text = _texts(at)
+    assert "🟢 OpenRouter" in text and "💤 DeepSeek" in text and "🔴 DeepSeek" not in text and not at.warning
+    assert "No es un fallo" in text and seen == ["openrouter/free"]             # solo se prueba OpenRouter
+    ask = next(b for b in at.main.button if b.key == "ai_ask")
+    assert "(1)" in ask.label
+    ask.click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert seen.count("openrouter/free") == 2 and len(seen) == 2                # DeepSeek no se consulta
+    assert "🔴 **DeepSeek**" not in " ".join(str(m.value) for m in at.markdown)

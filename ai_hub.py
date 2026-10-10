@@ -49,8 +49,10 @@ PROVIDERS = [
 ]
 
 NO_KEY, UNTESTED, CONNECTED, ERROR = "no_key", "untested", "connected", "error"
-LIGHT = {NO_KEY: "⚪", UNTESTED: "🟡", CONNECTED: "🟢", ERROR: "🔴"}
-STATE_TEXT = {NO_KEY: "sin clave", UNTESTED: "clave puesta, sin probar", CONNECTED: "conectada", ERROR: "error"}
+RESTING = "resting"           # con clave, pero el servicio no ofrece hoy ningún modelo gratis de esa IA: no es un fallo
+LIGHT = {NO_KEY: "⚪", UNTESTED: "🟡", CONNECTED: "🟢", ERROR: "🔴", RESTING: "💤"}
+STATE_TEXT = {NO_KEY: "sin clave", UNTESTED: "clave puesta, sin probar", CONNECTED: "conectada", ERROR: "error",
+              RESTING: "en pausa: sin modelo gratis hoy"}
 
 ACTIONS = {"hazlo_por_mi": "auto", "otro_archivo": "other_filter", "analizar": "auto_analyze"}
 
@@ -71,8 +73,8 @@ def configured(get_secret, get=None):
                 q.update(model=cands[0], candidates=cands[:3], auto_model=True)
             elif cands is not None:                    # lista leída y ninguno gratis
                 q["model"] = "(ninguno gratis ahora)"
-                q["unavailable"] = ("OpenRouter no ofrece ahora ningún modelo %s gratis (la versión de pago necesita "
-                                    "saldo). Las demás IA siguen; la app vuelve a mirar la lista cada %d h"
+                q["unavailable"] = ("OpenRouter no ofrece hoy ningún modelo %s gratis (solo de pago). No es un fallo "
+                                    "tuyo ni de la clave: las demás IA siguen y la app vuelve a mirar la lista cada %d h"
                                     % (p["name"], FREE_LIST_TTL // 3600))
         out.append(q)
     return out
@@ -141,9 +143,19 @@ def _model_gone(body):
     return "data policy" not in low and any(k in low for k in MODEL_GONE)
 
 
+def usable(provider):
+    """Tiene clave y un modelo gratis que usar: se prueba y se le pregunta."""
+    return bool(provider.get("api_key")) and not provider.get("unavailable")
+
+
 def initial_status(providers):
-    return {p["id"]: {"state": UNTESTED if p["api_key"] else NO_KEY, "detail": "", "model": p["model"]}
-            for p in providers}
+    def first(p):
+        if not p["api_key"]:
+            return {"state": NO_KEY, "detail": "", "model": p["model"]}
+        if p.get("unavailable"):
+            return {"state": RESTING, "detail": p["unavailable"], "model": p["model"]}
+        return {"state": UNTESTED, "detail": "", "model": p["model"]}
+    return {p["id"]: first(p) for p in providers}
 
 
 # ---------------------------------------------------------------- llamadas
@@ -310,6 +322,8 @@ def ping(provider, post=None):
     """Prueba de conexión mínima (pocos tokens). Estado para el semáforo."""
     if not provider.get("api_key"):
         return {"state": NO_KEY, "detail": "", "model": provider["model"]}
+    if provider.get("unavailable"):                # no se llama: hoy no hay modelo gratis
+        return {"state": RESTING, "detail": provider["unavailable"], "model": provider["model"]}
     r = chat(provider, [{"role": "user", "content": "Responde solo: OK"}], max_tokens=16, timeout=15, post=post)
     # Con HTTP 200 está conectada aunque un modelo de razonamiento no llegue a escribir "OK".
     ok = r["ok"]
@@ -358,7 +372,7 @@ def status_detail(provider, s):
             parts.append("elige un modelo gratis en cada pregunta")
     if state == CONNECTED and s.get("latency_ms") is not None:
         parts.append("%.1f s" % (s["latency_ms"] / 1000.0))
-    if state == ERROR and s.get("detail"):
+    if state in (ERROR, RESTING) and s.get("detail"):
         parts.append(s["detail"])
     return " · ".join(parts)
 
@@ -383,7 +397,7 @@ def ask_iter(providers, question, context, post=None):
     """La misma pregunta a todas las IA con clave, en paralelo; entrega cada resultado (ya
     verificado) en cuanto llega, para que la pantalla lo muestre sin esperar a la más lenta."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    active = [p for p in providers if p.get("api_key")]
+    active = [p for p in providers if usable(p)]
     if not active:
         return
     messages = _messages(question, context)

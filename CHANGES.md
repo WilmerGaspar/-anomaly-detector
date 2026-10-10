@@ -963,3 +963,16 @@ free. The paid version is available now - use this slug instead: openai/gpt-oss-
 164. Tests: lista de gratis (precios, `:free`, R1 primero), paso al siguiente gratis sin pedir nunca el de
      pago, ningún DeepSeek gratis, memoria de 6 h y reintento, modelo que contestó, voto único y el caso de
      la captura en la app real. Las pruebas nunca leen la lista real (`tests/conftest.py`). 254 en total.
+
+## 💤 «En pausa» cuando una IA no tiene hoy modelo gratis (no 🔴)
+
+Caso real (captura del 10-oct-2026, tras el cambio anterior): OpenRouter ya salía 🟢, pero DeepSeek salía
+🔴 con un recuadro de aviso. El mensaje era cierto: OpenRouter retiró su último DeepSeek gratis
+(`deepseek-v4-flash-0731:free`, 21-sep-2026). Pero no había nada que arreglar, y el rojo lo hacía parecer
+un fallo.
+
+165. Nuevo estado **💤 «en pausa: sin modelo gratis hoy»**. Se muestra una línea tranquila que dice que no es
+     un fallo de la persona ni de la clave, sin recuadro de aviso. A esa IA no se le hace la prueba de
+     conexión ni se le pregunta, y no aparece una tarjeta roja. El botón «Preguntar a las IA (n)» cuenta
+     solo las disponibles. El modelo se puede seguir poniendo a mano en «Detalle de cada IA».
+166. Tests: estado 💤 sin llamadas (`ai_hub`) y el caso de la captura en la app real. 255 en total.

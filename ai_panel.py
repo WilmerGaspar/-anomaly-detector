@@ -43,7 +43,7 @@ CSS = """<style>
 .ai-chip{display:inline-block;padding:0.1rem 0.55rem;margin:0.12rem 0.2rem 0.12rem 0;border:1px solid #2a5a35;
  border-radius:999px;font-size:0.82rem;white-space:nowrap}
 .ai-chip.on{border-color:#33ff66;color:#33ff66}.ai-chip.err{border-color:#ff6b6b;color:#ff9b9b}
-.ai-chip.wait{border-color:#ffb347;color:#ffcf8a}
+.ai-chip.wait{border-color:#ffb347;color:#ffcf8a}.ai-chip.off{border-color:#3b4a40;color:#8a9a8f}
 .ai-head{font-size:0.85rem;color:#8fd9a0}.ai-ok{color:#33ff66}.ai-warn{color:#ffb347}
 </style>"""
 
@@ -118,7 +118,7 @@ def _status(providers, force=False):
     cur = ss.get("ai_status")
     if force or not cur or cur.get("fp") != fp:
         status = H.initial_status(providers)
-        keyed = [p for p in providers if p["api_key"]]
+        keyed = [p for p in providers if H.usable(p)]          # las 💤 no se prueban: hoy no hay modelo gratis
         if keyed:
             with st.spinner("Probando la conexión con %d IA…" % len(keyed)):
                 status.update(H.ping_all(keyed))
@@ -128,7 +128,7 @@ def _status(providers, force=False):
 
 
 def _chips(providers, status):
-    cls = {H.CONNECTED: "on", H.ERROR: "err", H.UNTESTED: "wait", H.NO_KEY: ""}
+    cls = {H.CONNECTED: "on", H.ERROR: "err", H.UNTESTED: "wait", H.NO_KEY: "", H.RESTING: "off"}
     html = "".join('<span class="ai-chip %s">%s %s</span>' % (cls[status.get(p["id"], {}).get("state", H.NO_KEY)],
                                                              H.LIGHT[status.get(p["id"], {}).get("state", H.NO_KEY)],
                                                              p["name"]) for p in providers)
@@ -145,6 +145,10 @@ def _error_lines(providers, status):
             groups.setdefault(s.get("detail") or "error", []).append(p["name"])
     for detail, names in groups.items():
         st.warning("🔴 **%s**: %s" % (" y ".join(names), detail))
+    for p in providers:                                # 💤: aviso tranquilo, no es un error que arreglar
+        s = status.get(p["id"], {})
+        if s.get("state") == H.RESTING:
+            st.caption("💤 **%s**: %s." % (p["name"], s.get("detail") or H.STATE_TEXT[H.RESTING]))
 
 
 # ---------------------------------------------------------------- columna derecha
@@ -188,13 +192,17 @@ def render_controls(question, card, step, log, gate):
     else:
         st.caption("Sin IA conectada la guía por reglas funciona igual, gratis y sin conexión.")
         return
+    ready = [p for p in keyed if H.usable(p)]
+    if not ready:
+        st.caption("Ninguna IA tiene hoy un modelo gratis: la guía por reglas funciona igual.")
+        return
     actions = tuple(step.get("actions") or ())
     context = H.build_context(card, log, step, actions, gate=gate)
     st.caption("Preguntas rápidas:")
     for i, (label, q) in enumerate(H.QUICK_QUESTIONS):
         if st.button(label, key="ai_quick_%d" % i, use_container_width=True):
             ss["ai_pending"] = {"q": q, "ctx": context}
-    if st.button("🤖 Preguntar a las IA (%d)" % len(keyed), key="ai_ask", type="primary", use_container_width=True,
+    if st.button("🤖 Preguntar a las IA (%d)" % len(ready), key="ai_ask", type="primary", use_container_width=True,
                  help="Envía tu pregunta de arriba (o, si está vacía, «%s») con el resumen del análisis."
                       % H.DEFAULT_QUESTION):
         ss["ai_pending"] = {"q": (question or "").strip() or H.DEFAULT_QUESTION, "ctx": context}
@@ -265,7 +273,7 @@ def render_council(step, on_action):
     context = ss.get("ai_context_now")
     history = ss.setdefault("ai_history", [])
     if pending:
-        active = [p for p in providers if p["api_key"]]
+        active = [p for p in providers if H.usable(p)]
         st.markdown("#### 🤖 Consejo de IA · «%s»" % pending["q"])
         cols = st.columns(min(2, max(1, len(active))))
         slots = {p["id"]: cols[i % len(cols)].empty() for i, p in enumerate(active)}

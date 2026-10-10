@@ -278,3 +278,21 @@ def test_context_carries_more_interpretation():
     assert a["control_estrellas"]["valid"] is False and a["intermitencia"]["curtosis_1px"] == 36.5
     assert a["zonas_mas_fuertes"][0] == {"x": [300, 500], "y": [50, 250], "z": 251.1}
     assert a["centro_RA_Dec"] == [315.4, 68.2]
+
+
+@pytest.mark.parametrize("code,message,needle", [
+    (404, "No endpoints found matching your data policy (Free model publication). Configure: "
+          "https://openrouter.ai/settings/privacy", "openrouter.ai/settings/privacy"),
+    (401, "No auth credentials found", "vuelve a copiarla entera"),
+    (404, "deepseek/deepseek-r1-0528:free is not a valid model ID", "ese modelo ya no está disponible"),
+    (429, "Rate limit exceeded: free-models-per-day", "límite gratuito"),
+])
+def test_error_text_says_what_to_do_and_quotes_the_service(code, message, needle):
+    """Caso real: clave de OpenRouter pegada en la app y 🔴 en OpenRouter y DeepSeek R1 sin ver el motivo."""
+    text = H._error_text(code, json.dumps({"error": {"message": message, "code": code}}))
+    assert needle in text and "(%d)" % code in text and "mensaje del servicio" in text
+
+
+def test_error_text_never_repeats_keys_or_raw_json():
+    assert "sk-or-v1" not in H._error_text(400, "falló con sk-or-v1-abcdef123456")
+    assert H._error_text(401, json.dumps({"choices": []})) == "clave no válida o sin permiso (401)"

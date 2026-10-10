@@ -917,3 +917,23 @@ dinámica, con más interpretación y sin alucinaciones.
 154. Tests: claves por prefijo, pegar una clave en la app real (se prueba con ella y nunca se ve),
      respuestas en el orden en que llegan, contexto ampliado, reglas y formato, citas y
      referencias inventadas.
+
+## 🔴 con el motivo a la vista (OpenRouter «data policy») y cambio de modelo en la app
+
+Caso real: con la clave de OpenRouter pegada en la app, OpenRouter y DeepSeek R1 salían en 🔴 y
+el motivo quedaba escondido en «Detalle de cada IA».
+
+155. Bajo el semáforo aparece cada 🔴 con su motivo, en una sola línea para las IA que comparten
+     clave (OpenRouter y DeepSeek R1). El detalle se abre solo cuando hay un error.
+156. Los errores dicen qué hacer y citan el mensaje original del servicio. Ya no se ve el cuerpo
+     JSON en bruto, y cualquier texto con forma de clave se tapa.
+     - **«No endpoints found matching your data policy»** (lo más común con los modelos `:free` de
+       OpenRouter) → permitir los modelos gratuitos en openrouter.ai/settings/privacy.
+     - Clave inválida → volver a copiarla.
+     - Modelo retirado → cambiar el modelo.
+     - Límite gratuito → esperar.
+     - Sin saldo → usar un modelo `:free`.
+157. **Cambiar el modelo desde la app**, solo para esta sesión: si un modelo gratuito desaparece no
+     hace falta ir a Secrets. Las instrucciones de conexión ya avisan de la privacidad de OpenRouter.
+158. Tests: los cuatro mensajes de OpenRouter, sin claves ni JSON en bruto, aviso visible en la app
+     real y prueba de conexión con el modelo cambiado.

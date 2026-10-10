@@ -69,17 +69,66 @@ def initial_status(providers):
 
 # ---------------------------------------------------------------- llamadas
 
+def _provider_message(body):
+    """Mensaje de error del servicio (formato OpenAI/OpenRouter: {"error": {"message": …}}), en una
+    línea y sin nada con forma de clave."""
+    try:
+        data = json.loads(body) if isinstance(body, str) else body
+    except (TypeError, ValueError):
+        data = None
+    if isinstance(data, dict):                     # JSON: solo su mensaje de error, nunca el cuerpo entero
+        err = data.get("error")
+        msg = err.get("message") if isinstance(err, dict) else (err if isinstance(err, str) else data.get("message"))
+    else:
+        msg = body
+    msg = re.sub(r"\s+", " ", str(msg or "")).strip()
+    msg = re.sub(r"(nvapi-|sk-or-|gsk_|AIza)[\w-]+", "[clave]", msg)
+    return msg[:180]
+
+
+# Qué hacer según el mensaje del servicio (se busca en minúsculas; el primero que encaja gana).
+# OpenRouter devuelve 404 «No endpoints found matching your data policy» cuando su configuración de
+# privacidad no permite los modelos gratuitos (sus proveedores pueden guardar las preguntas).
+ERROR_ADVICE = [
+    (("data policy", "privacy"),
+     "OpenRouter bloquea los modelos gratis por tu configuración de privacidad. Arreglo: entra en "
+     "openrouter.ai/settings/privacy y permite los modelos gratuitos (pueden guardar las preguntas; la app "
+     "solo envía números públicos del telescopio)"),
+    (("no auth credentials", "user not found", "invalid api key", "incorrect api key", "api key not valid",
+      "invalid_api_key", "unauthorized", "authentication"),
+     "clave no válida: vuelve a copiarla entera desde la web del servicio"),
+    (("not a valid model", "model not found", "does not exist", "no endpoints found", "unknown model",
+      "not found for api"),
+     "ese modelo ya no está disponible: cambia el modelo en Secrets (por ejemplo DEEPSEEK_MODEL u OPENROUTER_MODEL)"),
+    (("rate limit", "rate-limit", "per-day", "quota", "too many requests"),
+     "límite gratuito alcanzado: espera unos minutos (o hasta mañana si es el límite diario)"),
+    (("credits", "insufficient", "payment"),
+     "la cuenta no tiene saldo para este modelo: usa un modelo gratuito (los que terminan en :free)"),
+]
+
+
 def _error_text(code, body=""):
-    body = str(body or "")[:200]
-    if code in (401, 403):
-        return "clave no válida o sin permiso (%d)" % code
-    if code == 404:
-        return "modelo no encontrado (%d): cambia el modelo en Secrets" % code
-    if code == 429:
-        return "límite gratuito alcanzado (429): espera un minuto"
-    if code and code >= 500:
-        return "el servicio falla ahora mismo (%d)" % code
-    return "respuesta inesperada (%s) %s" % (code, body)
+    """Motivo del error en claro, qué hacer y el mensaje original del servicio."""
+    msg = _provider_message(body)
+    low = msg.lower()
+    advice = next((a for keys, a in ERROR_ADVICE if any(k in low for k in keys)), None)
+    if advice is None:
+        if code in (401, 403):
+            advice = "clave no válida o sin permiso"
+        elif code == 404:
+            advice = "modelo no encontrado: cambia el modelo en Secrets"
+        elif code == 429:
+            advice = "límite gratuito alcanzado: espera un minuto"
+        elif code == 402:
+            advice = "la cuenta no tiene saldo para este modelo: usa un modelo gratuito"
+        elif code and code >= 500:
+            advice = "el servicio falla ahora mismo: prueba más tarde"
+        else:
+            advice = "respuesta inesperada"
+    out = "%s (%s)" % (advice, code)
+    if msg and msg.lower() not in advice.lower():
+        out += " · mensaje del servicio: «%s»" % msg
+    return out
 
 
 # Modelos de razonamiento tipo DeepSeek-R1. Recomendaciones de su repositorio: temperatura 0.5-0.7

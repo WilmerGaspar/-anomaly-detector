@@ -32,11 +32,12 @@ PROVIDERS = [
      "key": "GROQ_API_KEY", "model_key": "GROQ_MODEL", "default_model": "openai/gpt-oss-120b",
      "signup": "https://console.groq.com", "extra": {"reasoning_effort": "low"}},
     # OpenRouter retira modelos «:free» sin aviso (10-oct-2026: gpt-oss-120b:free y deepseek-r1-0528:free
-    # responden 404 «unavailable for free» y proponen la versión de pago). «openrouter/free» es su
-    # enrutador oficial: elige en cada petición un modelo gratis de los que haya ese día.
+    # responden 404 «unavailable for free» y proponen la versión de pago). Se usa el MEJOR gratis del día
+    # de su lista pública (ver best_free): su enrutador «openrouter/free» elige al azar y llegó a contestar
+    # un modelo de 2,6B que se inventó datos. El enrutador queda de último recurso.
     {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
      "key": "OPENROUTER_API_KEY", "model_key": "OPENROUTER_MODEL", "default_model": "openrouter/free",
-     "signup": "https://openrouter.ai/openrouter/free"},
+     "signup": "https://openrouter.ai/collections/free-models", "free_pick": "best"},
     # DeepSeek (R1 y sucesores, MIT): no caben en Streamlit Cloud, se usan gratis por OpenRouter con la
     # MISMA clave OPENROUTER_API_KEY. El modelo se elige solo de la lista pública de OpenRouter (precio 0
     # y «:free»; R1 primero si vuelve a ser gratis); el de reserva solo se usa si la lista no se puede leer.
@@ -67,7 +68,13 @@ def configured(get_secret, get=None):
         key = (get_secret(p["key"]) or "").strip()
         chosen = (get_secret(p["model_key"]) or "").strip()
         q = dict(p, api_key=key, model=chosen or p["default_model"])
-        if p.get("free_family") and key and not chosen:
+        if p.get("free_pick") and key and not chosen:
+            # El mejor gratis de hoy (no uno al azar): sin los de las otras IA con la misma clave.
+            best = best_free(get=get, exclude=[x["free_family"] for x in PROVIDERS if x.get("free_family")])
+            if best:
+                cands = [e["id"] for e in best[:3]] + [p["default_model"]]      # el enrutador, de último recurso
+                q.update(model=cands[0], candidates=cands, auto_model=True, size_b=best[0]["size_b"])
+        elif p.get("free_family") and key and not chosen:
             cands = free_candidates(p["free_family"], get=get)
             if cands:
                 q.update(model=cands[0], candidates=cands[:3], auto_model=True)
@@ -86,7 +93,7 @@ def configured(get_secret, get=None):
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 FREE_LIST_TTL = 6 * 3600          # se vuelve a leer cada 6 h (los gratis cambian a menudo)
 FREE_LIST_RETRY = 600             # si falló, se reintenta a los 10 min
-_FREE = {"t": 0.0, "ids": None, "bad": set()}
+_FREE = {"t": 0.0, "ids": None, "entries": None, "bad": set()}
 
 
 def _models_json(get, timeout=8):
@@ -94,8 +101,27 @@ def _models_json(get, timeout=8):
     return r.json() if getattr(r, "status_code", 0) == 200 else None
 
 
-def free_ids(data):
-    """IDs gratis de verdad: precio 0 de entrada y de salida y terminados en «:free». Más nuevos primero."""
+# Tamaño (miles de millones de parámetros) según el nombre («gemma-4-31b», «gpt-oss-120b»; no «a3b», que son
+# los activos) o, si no lo dice, según la descripción («284B total parameters», «2.6 billion parameters»).
+_SIZE_ID = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)b(?![a-z0-9])")
+_SIZE_DESC = re.compile(r"(\d+(?:\.\d+)?)\s*(?:([bt])\b|(billion|trillion))[\s-]*(?:total\s+)?param", re.I)
+MIN_GOOD_B = 20                   # por debajo, los modelos se inventan datos con facilidad (caso real: 2,6B)
+_SKIP = re.compile(r"guard|embed|rerank|moderat", re.I)          # no son modelos para conversar
+
+
+def model_size_b(model_id, description=""):
+    """Parámetros en miles de millones que dice el modelo de sí mismo, o None si no lo dice."""
+    name = str(model_id or "").lower().split("/")[-1].split(":")[0]
+    found = [float(x) for x in _SIZE_ID.findall(name)]
+    if found:
+        return max(found)
+    sizes = [float(n) * (1000.0 if (u or w or "").lower() in ("t", "trillion") else 1.0)
+             for n, u, w in _SIZE_DESC.findall(str(description or ""))]
+    return max(sizes) if sizes else None
+
+
+def free_entries(data):
+    """Modelos gratis de verdad: precio 0 de entrada y de salida y terminados en «:free». Más nuevos primero."""
     out = []
     for m in (data or {}).get("data") or []:
         mid, pr = str(m.get("id") or ""), m.get("pricing") or {}
@@ -104,8 +130,16 @@ def free_ids(data):
         except (TypeError, ValueError):
             free = False
         if free and mid.endswith(":free"):
-            out.append((int(m.get("created") or 0), mid))
-    return [mid for _, mid in sorted(out, reverse=True)]
+            arch = m.get("architecture") or {}
+            ins, outs = arch.get("input_modalities"), arch.get("output_modalities")
+            out.append({"id": mid, "created": int(m.get("created") or 0),
+                        "size_b": model_size_b(mid, m.get("description")),
+                        "text": (not ins or "text" in ins) and (not outs or "text" in outs)})
+    return sorted(out, key=lambda e: e["created"], reverse=True)
+
+
+def free_ids(data):
+    return [e["id"] for e in free_entries(data)]
 
 
 def free_models(get=None, now=None):
@@ -119,13 +153,40 @@ def free_models(get=None, now=None):
         get = requests.get
     try:
         data = _models_json(get)
-        ids = free_ids(data) if isinstance(data, dict) and data.get("data") else None
+        entries = free_entries(data) if isinstance(data, dict) and data.get("data") else None
     except Exception:                              # red, JSON roto…: se usa el modelo de reserva
-        ids = None
-    _FREE.update(t=now, ids=ids)
+        entries = None
+    ids = [e["id"] for e in entries] if entries is not None else None
+    _FREE.update(t=now, ids=ids, entries=entries)
     if ids is not None:
         _FREE["bad"] = set()                       # lista nueva: un modelo que volvió a ser gratis vale otra vez
     return ids
+
+
+def _entries(get=None):
+    ids = free_models(get)
+    if ids is None:
+        return None
+    entries = _FREE.get("entries")
+    if entries is None or [e["id"] for e in entries] != ids:          # lista puesta solo con nombres
+        entries = [{"id": i, "created": 0, "size_b": model_size_b(i), "text": True} for i in ids]
+    return entries
+
+
+def best_free(get=None, exclude=()):
+    """Los gratis de hoy, del más capaz al menos: primero los de ≥ 20B (más grande primero), luego los que no
+    dicen su tamaño y al final los pequeños; en cada grupo, los de programación al final. None si no hay lista."""
+    entries = _entries(get)
+    if entries is None:
+        return None
+
+    def rank(e):
+        size = e["size_b"]
+        tier = 0 if (size or 0) >= MIN_GOOD_B else (1 if size is None else 2)
+        return (tier, "code" in e["id"].lower(), -(size or 0), -e["created"])
+    pool = [e for e in entries if e["text"] and e["id"] not in _FREE["bad"] and not _SKIP.search(e["id"])
+            and not any(e["id"].startswith(f) for f in exclude)]
+    return sorted(pool, key=rank)
 
 
 def free_candidates(family, get=None):
@@ -141,6 +202,17 @@ def _model_gone(body):
     """El servicio dice que ese modelo ya no existe o ya no es gratis (no si es la privacidad)."""
     low = _provider_message(body).lower()
     return "data policy" not in low and any(k in low for k in MODEL_GONE)
+
+
+def _try_next(code, body):
+    """Con un modelo elegido solo, ¿probar el siguiente gratis? Si ya no existe o no es gratis, si lo prohíbe
+    (403: p. ej. solo para agentes) o si su proveedor está saturado (429 «upstream»; el límite diario de la
+    cuenta no, porque vale para todos). Devuelve (probar_otro, no_volver_a_usarlo)."""
+    if _model_gone(body) or code == 403:
+        return True, True
+    if code == 429 and "upstream" in _provider_message(body).lower():
+        return True, False
+    return False, False
 
 
 def usable(provider):
@@ -291,9 +363,11 @@ def chat(provider, messages, max_tokens=1200, timeout=60, post=None):
             detail = "no responde (tiempo agotado)" if "Timeout" in name else "sin conexión con el servicio (%s)" % name
             return {"ok": False, "text": "", "detail": detail, "latency_ms": None, "model": model}
         code, body = getattr(r, "status_code", 0), getattr(r, "text", "")
-        if code != 200 and provider.get("auto_model") and _model_gone(body):
-            _FREE["bad"].add(model)
-            if i + 1 < len(provider["candidates"]):
+        if code != 200 and provider.get("auto_model"):
+            again, retired = _try_next(code, body)
+            if retired:
+                _FREE["bad"].add(model)
+            if again and i + 1 < len(provider["candidates"]):
                 continue
         break
     ms = int(1000 * (time.monotonic() - t0))
@@ -366,7 +440,10 @@ def status_detail(provider, s):
     parts = ["%s **%s**" % (LIGHT[state], provider["name"]), STATE_TEXT[state]]
     if state != NO_KEY:
         parts.append("`%s`" % s.get("model", provider["model"]))
-        if provider.get("auto_model"):
+        if provider.get("auto_model") and provider.get("free_pick"):
+            size = provider.get("size_b")
+            parts.append("el mejor gratis de hoy" + (" (≈%gB parámetros)" % size if size else ""))
+        elif provider.get("auto_model"):
             parts.append("gratis hoy, elegido solo")
         elif provider["model"] == "openrouter/free":
             parts.append("elige un modelo gratis en cada pregunta")

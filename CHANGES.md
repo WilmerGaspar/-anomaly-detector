@@ -976,3 +976,20 @@ un fallo.
      conexión ni se le pregunta, y no aparece una tarjeta roja. El botón «Preguntar a las IA (n)» cuenta
      solo las disponibles. El modelo se puede seguir poniendo a mano en «Detalle de cada IA».
 166. Tests: estado 💤 sin llamadas (`ai_hub`) y el caso de la captura en la app real. 255 en total.
+
+## OpenRouter: el mejor modelo gratis del día, no uno al azar
+
+Caso real (captura del 10-oct-2026): `openrouter/free` eligió al azar `liquid/lfm-2.5-2.6b` (2.600 millones
+de parámetros, frente a 120.000 millones de gpt-oss en Groq). Ese modelo se inventó `[mision_JWST]` y
+`[objeto_NGC_7023]`. La comprobación lo marcó ⚠️, pero un modelo tan pequeño no sirve para interpretar.
+
+167. **OpenRouter elige el gratis más capaz** de la lista pública (`best_free`). El tamaño se lee del nombre
+     (`gemma-4-31b` → 31B; `30b-a3b` → 30, porque `a3b` son los activos) o, si no lo dice, de la descripción
+     (`284B total parameters`). Orden: primero los de ≥ 20B, de mayor a menor; luego los que no dicen su
+     tamaño; al final los pequeños. En cada grupo los de programación van detrás. Se descartan los que no
+     escriben texto y los clasificadores (`guard`, `embed`), y los DeepSeek quedan para su propia IA. Se
+     prueban hasta 3 y `openrouter/free` de último recurso. «Detalle» lo dice: «el mejor gratis de hoy
+     (≈31B parámetros)». Un modelo puesto a mano manda.
+168. **Se pasa al siguiente gratis** también con un 403 (p. ej. «solo para agentes») y con un 429 «upstream»
+     (proveedor saturado). Con el límite diario de la cuenta no se cambia, porque vale para todos.
+169. Tests: tamaño por nombre y por descripción, orden de elección, cuándo probar el siguiente y app real.

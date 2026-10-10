@@ -172,7 +172,7 @@ def test_red_light_shows_the_reason_and_model_can_change_in_the_app(monkeypatch)
 def test_retired_free_models_screenshot_case(monkeypatch):
     """Caso real (captura del 10-oct-2026): con los modelos de antes, OpenRouter y DeepSeek R1 en 🔴 por
     «This model is unavailable for free. The paid version is available now - use this slug instead: …».
-    Ahora: OpenRouter usa openrouter/free, DeepSeek uno gratis de la lista (si el primero ya no lo es,
+    Ahora: OpenRouter usa el mejor gratis de la lista, DeepSeek uno gratis (si el primero ya no lo es,
     el siguiente) y nunca se pide la versión de pago."""
     for k in list(KEYS) + ["GEMINI_API_KEY", "OPENROUTER_MODEL", "DEEPSEEK_MODEL"]:
         monkeypatch.delenv(k, raising=False)
@@ -199,7 +199,7 @@ def test_retired_free_models_screenshot_case(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at) + " ".join(str(m.value) for m in at.markdown)
     assert "🟢 OpenRouter" in text and "🟢 DeepSeek" in text and not at.warning
-    assert "openrouter/free" in seen and "deepseek/deepseek-v4-flash:free" in seen
+    assert "google/gemma-4-31b-it:free" in seen and "deepseek/deepseek-v4-flash:free" in seen
     assert not [m for m in seen if not (m.endswith(":free") or m == "openrouter/free")]     # nada de pago
     # Si la persona pone a mano el modelo retirado, el 🔴 explica qué hacer (no «ve a Secrets»).
     box = next(t for t in at.text_input if t.label == "OpenRouter")
@@ -235,10 +235,10 @@ def test_no_free_deepseek_today_is_a_calm_pause_not_a_red_error(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     text = _texts(at)
     assert "🟢 OpenRouter" in text and "💤 DeepSeek" in text and "🔴 DeepSeek" not in text and not at.warning
-    assert "No es un fallo" in text and seen == ["openrouter/free"]             # solo se prueba OpenRouter
+    assert "No es un fallo" in text and seen == ["google/gemma-4-31b-it:free"]  # solo se prueba OpenRouter
     ask = next(b for b in at.main.button if b.key == "ai_ask")
     assert "(1)" in ask.label
     ask.click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert seen.count("openrouter/free") == 2 and len(seen) == 2                # DeepSeek no se consulta
+    assert seen.count("google/gemma-4-31b-it:free") == 2 and len(seen) == 2     # DeepSeek no se consulta
     assert "🔴 **DeepSeek**" not in " ".join(str(m.value) for m in at.markdown)

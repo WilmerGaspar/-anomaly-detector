@@ -135,3 +135,35 @@ def test_paste_a_key_in_the_app(monkeypatch):
     text = _texts(at) + " ".join(str(m.value) for m in at.markdown)
     assert "🟢 NVIDIA" in text and "SECRETO" not in text
     assert [b for b in at.main.button if b.key == "ai_ask"]                      # ya se puede preguntar
+
+
+def test_red_light_shows_the_reason_and_model_can_change_in_the_app(monkeypatch):
+    """OpenRouter con la privacidad cerrada: 404 «data policy». El motivo y el arreglo se ven bajo el
+    semáforo (una línea para OpenRouter y DeepSeek R1) y el modelo se puede cambiar sin Secrets."""
+    for k in list(KEYS) + ["GEMINI_API_KEY"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-SECRETO-4")
+    seen = []
+
+    class _Err:
+        status_code = 404
+        text = json.dumps({"error": {"message": "No endpoints found matching your data policy (Free model "
+                                                "publication). Configure: https://openrouter.ai/settings/privacy"}})
+
+    def post(url, headers=None, json=None, timeout=None, **kw):
+        seen.append(json["model"])
+        return _Err()
+
+    monkeypatch.setattr(requests, "post", post)
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    warns = [w.value for w in at.warning]
+    assert any("OpenRouter y DeepSeek R1" in w and "openrouter.ai/settings/privacy" in w for w in warns), warns
+    box = next(t for t in at.text_input if t.label == "DeepSeek R1")
+    box.input("deepseek/deepseek-r1:free")
+    next(b for b in at.button if "Usar estos modelos" in str(b.label)).click().run()
+    at.run()
+    assert "deepseek/deepseek-r1:free" in seen                      # la prueba usa el modelo nuevo
+    assert "SECRETO" not in " ".join(str(m.value) for m in at.markdown) + " ".join(warns)

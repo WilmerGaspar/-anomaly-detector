@@ -30,7 +30,10 @@ SECRETS_STEPS = (
     "4. Recarga la app: el semáforo pasa a 🟢.\n\n"
     "Otras: `GROQ_API_KEY` (gsk_…), `GEMINI_API_KEY` (AIza…). Con la de OpenRouter se encienden dos IA "
     "(OpenRouter y DeepSeek R1). Modelos opcionales: `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, "
-    "`DEEPSEEK_MODEL`, `GEMINI_MODEL`."
+    "`DEEPSEEK_MODEL`, `GEMINI_MODEL`.\n\n"
+    "**OpenRouter gratis:** sus modelos `:free` solo funcionan si en **openrouter.ai/settings/privacy** permites los "
+    "modelos gratuitos (sus proveedores pueden guardar las preguntas; la app solo envía números públicos del "
+    "telescopio). Si no, salen 🔴 con «data policy»."
 )
 
 CSS = """<style>
@@ -48,10 +51,16 @@ def _session_keys():
     return st.session_state.setdefault("ai_session_keys", {})
 
 
+def _session_models():
+    return st.session_state.setdefault("ai_session_models", {})
+
+
 def get_secret(name):
-    """Clave pegada en esta sesión; si no, Secrets de Streamlit; si no, variable de entorno."""
+    """Clave (o modelo) puesto en esta sesión; si no, Secrets de Streamlit; si no, variable de entorno."""
     if name in _session_keys():
         return _session_keys()[name]
+    if _session_models().get(name):
+        return _session_models()[name]
     try:
         if st.secrets.load_if_toml_exists():
             value = st.secrets.get(name)
@@ -123,6 +132,18 @@ def _chips(providers, status):
     st.markdown(html, unsafe_allow_html=True)
 
 
+def _error_lines(providers, status):
+    """El motivo de cada 🔴 a la vista (antes quedaba dentro de «Detalle»). Las IA que comparten clave y
+    error (OpenRouter y DeepSeek R1) van en una sola línea."""
+    groups = {}
+    for p in providers:
+        s = status.get(p["id"], {})
+        if s.get("state") == H.ERROR:
+            groups.setdefault(s.get("detail") or "error", []).append(p["name"])
+    for detail, names in groups.items():
+        st.warning("🔴 **%s**: %s" % (" y ".join(names), detail))
+
+
 # ---------------------------------------------------------------- columna derecha
 
 def render_controls(question, card, step, log, gate):
@@ -136,16 +157,27 @@ def render_controls(question, card, step, log, gate):
         st.success(ss.pop("ai_flash"))
     status = _status(providers, force=st.session_state.pop("ai_force_ping", False))
     _chips(providers, status)
+    _error_lines(providers, status)
     with st.expander("🔑 Conectar una IA (pegar la clave)", expanded=not keyed):
         _key_form()
         st.markdown(SECRETS_STEPS)
     if keyed:
-        with st.expander("Detalle de cada IA"):
+        with st.expander("Detalle de cada IA", expanded=any(s.get("state") == H.ERROR for s in status.values())):
             for p in providers:
                 line = H.status_detail(p, status.get(p["id"], {}))
                 if p["api_key"]:
                     line += " · clave %s" % _key_source(p)
                 st.markdown(line + " · [web](%s)" % p["signup"])
+            # Cambiar de modelo sin ir a Secrets (si uno gratuito desaparece): solo esta sesión.
+            with st.form("ai_model_form"):
+                st.caption("Cambiar el modelo (solo esta sesión; vacío = el de siempre):")
+                new_models = {p["model_key"]: st.text_input(p["name"], value=_session_models().get(p["model_key"], ""),
+                                                            placeholder=p["model"], key="ai_model_" + p["id"])
+                              for p in providers if p["api_key"]}
+                if st.form_submit_button("Usar estos modelos"):
+                    _session_models().update({k: v.strip() for k, v in new_models.items()})
+                    ss.pop("ai_status", None)
+                    st.rerun()
             if st.button("🔄 Probar conexiones", key="ai_ping"):
                 ss["ai_force_ping"] = True
                 st.rerun()

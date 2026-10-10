@@ -29,11 +29,14 @@ SECRETS_STEPS = (
     "```\nNVIDIA_API_KEY = \"nvapi-…\"\nOPENROUTER_API_KEY = \"sk-or-…\"\n```\n"
     "4. Recarga la app: el semáforo pasa a 🟢.\n\n"
     "Otras: `GROQ_API_KEY` (gsk_…), `GEMINI_API_KEY` (AIza…). Con la de OpenRouter se encienden dos IA "
-    "(OpenRouter y DeepSeek R1). Modelos opcionales: `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, "
+    "(OpenRouter y DeepSeek). Modelos opcionales: `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, "
     "`DEEPSEEK_MODEL`, `GEMINI_MODEL`.\n\n"
-    "**OpenRouter gratis:** sus modelos `:free` solo funcionan si en **openrouter.ai/settings/privacy** permites los "
-    "modelos gratuitos (sus proveedores pueden guardar las preguntas; la app solo envía números públicos del "
-    "telescopio). Si no, salen 🔴 con «data policy»."
+    "**OpenRouter, siempre gratis:** la app usa `openrouter/free` (su enrutador oficial elige un modelo gratis en "
+    "cada pregunta) y un DeepSeek que la lista pública de OpenRouter marque gratis ese día (precio 0 y `:free`). "
+    "OpenRouter retira modelos gratis a menudo; si uno responde «unavailable for free», la app pasa al siguiente "
+    "gratis y nunca al de pago. Los gratis solo funcionan si en **openrouter.ai/settings/privacy** permites los "
+    "modelos gratuitos (pueden guardar las preguntas; la app solo envía números públicos del telescopio). Si no, "
+    "salen 🔴 con «data policy»."
 )
 
 CSS = """<style>
@@ -134,7 +137,7 @@ def _chips(providers, status):
 
 def _error_lines(providers, status):
     """El motivo de cada 🔴 a la vista (antes quedaba dentro de «Detalle»). Las IA que comparten clave y
-    error (OpenRouter y DeepSeek R1) van en una sola línea."""
+    error (OpenRouter y DeepSeek) van en una sola línea."""
     groups = {}
     for p in providers:
         s = status.get(p["id"], {})
@@ -170,7 +173,8 @@ def render_controls(question, card, step, log, gate):
                 st.markdown(line + " · [web](%s)" % p["signup"])
             # Cambiar de modelo sin ir a Secrets (si uno gratuito desaparece): solo esta sesión.
             with st.form("ai_model_form"):
-                st.caption("Cambiar el modelo (solo esta sesión; vacío = el de siempre):")
+                st.caption("Cambiar el modelo (solo esta sesión; vacío = el de la app, gratis). En OpenRouter "
+                           "usa solo nombres que terminen en `:free` u `openrouter/free`: los demás son de pago.")
                 new_models = {p["model_key"]: st.text_input(p["name"], value=_session_models().get(p["model_key"], ""),
                                                             placeholder=p["model"], key="ai_model_" + p["id"])
                               for p in providers if p["api_key"]}
@@ -208,7 +212,10 @@ def _readable(text):
 
 def _answer_card(r):
     with st.container(border=True):
-        meta = " · ".join(x for x in (r.get("model"), ("%.1f s" % (r["latency_ms"] / 1000.0))
+        model = r.get("model") or ""
+        if r.get("served_model") and r["served_model"] != model:
+            model += " → " + r["served_model"]                # qué modelo gratis eligió openrouter/free
+        meta = " · ".join(x for x in (model, ("%.1f s" % (r["latency_ms"] / 1000.0))
                                       if r.get("latency_ms") else "") if x)
         if not r["ok"]:
             st.markdown("🔴 **%s** <span class='ai-head'>%s</span>" % (r["name"], meta), unsafe_allow_html=True)

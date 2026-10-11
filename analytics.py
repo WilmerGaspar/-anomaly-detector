@@ -170,9 +170,18 @@ def psf_corrected_fit(k, p, k_min, k_max, nu_c):
     if hi / k_min < MIN_RANGE:
         return {"beta": float("nan"), "r2": float("nan"), "k_min": k_min, "k_max": hi, "n_points": 0,
                 "psf_limited": True}
+    from psf import signal_power
+    k = np.asarray(k, dtype=float)
+    sig, ok, noise = signal_power(k, p, nu_c)          # sin el ruido del detector (si se puede medir)
+    inside = ok & (k >= k_min) & (k <= hi)
+    if inside.any():
+        hi = min(hi, float(k[inside].max()))
+    if hi / k_min < MIN_RANGE or inside.sum() < 3:
+        return {"beta": float("nan"), "r2": float("nan"), "k_min": k_min, "k_max": hi, "n_points": int(inside.sum()),
+                "psf_limited": True, "noise_floor": noise}
     m2 = np.maximum(mtf(k, nu_c) ** 2, 1e-6)
-    fit = fit_power_law(k, np.asarray(p) / m2, k_min=k_min, k_max=hi)
-    fit["psf_limited"] = False
+    fit = fit_power_law(k[ok], sig[ok] / m2[ok], k_min=k_min, k_max=hi)
+    fit.update(psf_limited=False, noise_floor=noise, noise_subtracted=noise is not None)
     return fit
 
 
@@ -191,6 +200,7 @@ def spectrum_fit_full_resolution(image, small_shape, k_min=0.02, k_max=0.25, nu_
         corr = psf_corrected_fit(kf, pf, k_min * f, k_max * f, nu_c)
         fit = dict(fit, beta_raw=fit["beta"], r2_raw=fit["r2"], beta=corr["beta"], r2=corr["r2"],
                    psf_corrected=True, psf_limited=corr["psf_limited"], n_points=corr["n_points"],
+                   noise_subtracted=bool(corr.get("noise_subtracted")),
                    k_max=min(k_max, corr["k_max"] / f))   # en ciclos/pixel reducido, como la grafica
     return fit
 

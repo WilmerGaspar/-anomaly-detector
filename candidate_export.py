@@ -13,7 +13,7 @@ SCHEMA_VERSION = "cosmic-candidate.v0.1"
 # 3: 2.45 frente a 1.66 en un MIRI F1000W real) y prueba de direccion preferente.
 # 4 (10-oct-2026): beta corregido por la difraccion del telescopio (psf.py): sin corregir, MIRI
 # F2100W subia 2.5 -> 3.6 y NIRCam F200W 2.5 -> 2.8.
-DESCRIPTORS_VERSION = 4
+DESCRIPTORS_VERSION = 5
 FDR_SCOPE = ["aniso", "flatness", "entropy", "energy_mean"]
 NOT_TESTED = ("renormalization_group", "lyapunov_stability", "fibonacci", "graph_morphology", "persistent_homology", "fractal_base", "kolmogorov_1941")
 

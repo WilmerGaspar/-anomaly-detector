@@ -136,7 +136,8 @@ def _magnetic(m):
     ok = p <= 0.01
     return (COMPATIBLE if ok else NOT_COMPATIBLE), (
         "%s: estructuras a %s, coherencia %.2f frente a campos sin dirección (95 %% hasta %s), p = %.2f"
-        % ("dirección preferente" if ok else "sin dirección preferente",
+        % ("dirección preferente" if ok else
+           "indicio débil de dirección, no concluyente (hace falta p ≤ 0.01)" if p <= 0.05 else "sin dirección preferente",
            ("PA %s° en el cielo (este desde el norte)" % _fmt(m["structure_pa"], 0)) if m.get("structure_pa") is not None
            else ("%s° en la imagen" % _fmt(m["structure_direction"], 0)), R, _fmt(m["orientation_null_q95"]), p))
 

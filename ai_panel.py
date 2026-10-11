@@ -153,7 +153,7 @@ def _error_lines(providers, status):
 
 # ---------------------------------------------------------------- columna derecha
 
-def render_controls(question, card, step, log, gate, flow_items=None, feasible=()):
+def render_controls(question, card, step, log, gate, flow_items=None, feasible=(), target=""):
     """Semáforo, claves y preguntas. Una pregunta queda pendiente y la responde `render_council`.
     `flow_items`/`feasible`: revisión del flujo por reglas y órdenes posibles (flow.py)."""
     ss = st.session_state
@@ -205,7 +205,7 @@ def render_controls(question, card, step, log, gate, flow_items=None, feasible=(
     if ss.get("ai_welcome") is None and any(status.get(p["id"], {}).get("state") == H.CONNECTED for p in ready):
         ss["ai_welcome"] = "open"
     if ss.get("ai_welcome") == "open":
-        _welcome([p["name"] for p in ready], flow_items or [])
+        _welcome([p["name"] for p in ready], flow_items or [], target if "auto" in feasible else "")
     if ss.pop("flow_review_request", False):
         ss["ai_pending"] = {"q": H.REVIEW_QUESTION, "ctx": context, "kind": "orders"}
     st.caption("Preguntas rápidas:")
@@ -368,6 +368,8 @@ def render_council(step, on_action, feasible=()):
             known = H.known_names(latest["ctx"])
             _grid(latest["results"], known, key="h0")
             _consensus(latest["results"], actions, latest["ctx"] == context, on_action, key="ai_do")
+            if latest.get("kind") == "orders" and latest["ctx"] == context:
+                st.markdown("👇 **Elige las órdenes justo debajo, en «📋 Órdenes de trabajo», y pulsa ▶ Ejecutar.**")
             st.caption("IA externas: pueden equivocarse. El semáforo, los números y la tabla de hipótesis los calcula la "
                        "app. Cada respuesta se comprueba: cifras que no están en los datos, referencias inventadas, datos "
                        "citados que no existen (✗ tachados) y afirmaciones de más (✅/⚠️). Solo las ✅ votan la acción.")
@@ -412,22 +414,34 @@ def _welcome_later():
 
 
 @st.dialog("🤖 Asistente CMS-80", width="large", on_dismiss=_welcome_later)
-def _welcome(names, items):
-    """Ventana al entrar: las IA conectadas preguntan si empezamos. Nada se ejecuta sin un clic."""
+def _welcome(names, items, target=""):
+    """Ventana al entrar: las IA conectadas preguntan si empezamos. Sin imagen cargada, «Sí» empieza a
+    trabajar (busca, carga y analiza `target`) y la revisión llega con el resultado; con resultado, «Sí»
+    pide la revisión y las órdenes. Nada se ejecuta sin un clic."""
     import flow
     todo = [it for it in items if it["estado"] != flow.OK]
     st.markdown("**Hola. Tengo %d IA conectada%s: %s.**" % (len(names), "" if len(names) == 1 else "s", ", ".join(names)))
-    st.markdown("Antes de trabajar reviso todo el flujo con las reglas de la app (archivo, región, nulo, controles, "
-                "difracción, otro filtro, control conocido) y les pido a las IA que **propongan órdenes**. "
-                "Tú marcas cuáles se ejecutan: nada se hace sin tu clic.")
+    if target:
+        st.markdown("Empiezo por lo que falta: **buscar %s en MAST, cargar el mejor archivo y analizarlo** (1–3 min). Con "
+                    "el resultado reviso todo el flujo con las reglas de la app y las IA **proponen las siguientes "
+                    "órdenes**; tú marcas cuáles se ejecutan." % target)
+    else:
+        st.markdown("Reviso todo el flujo con las reglas de la app (archivo, región, nulo, controles, difracción, otro "
+                    "filtro, control conocido) y las IA **proponen órdenes**. Tú marcas cuáles se ejecutan: nada se hace "
+                    "sin tu clic.")
     if todo:
         st.markdown("Ahora mismo:\n" + "\n".join("- %s **%s**: %s" % (flow.ICON[it["estado"]], it["paso"], it["detalle"])
                                                 for it in todo[:3]))
     st.markdown("**¿Listo para trabajar?**")
     c1, c2 = st.columns([3, 2])
-    if c1.button("✅ Sí: revisa el flujo y propón órdenes", key="ai_welcome_yes", type="primary", use_container_width=True):
+    yes = "✅ Sí: busca, carga y analiza %s" % target if target else "✅ Sí: revisa el flujo y propón órdenes"
+    if c1.button(yes, key="ai_welcome_yes", type="primary", use_container_width=True):
         st.session_state["ai_welcome"] = "yes"
-        st.session_state["flow_review_request"] = True
+        if target:
+            st.session_state["order_queue"], st.session_state["order_log"] = ["auto"], []
+            st.session_state["auto_review_after"] = True
+        else:
+            st.session_state["flow_review_request"] = True
         st.rerun()
     if c2.button("Ahora no", key="ai_welcome_no", use_container_width=True):
         _welcome_later()
@@ -443,9 +457,26 @@ def _latest_orders():
     return H.consensus_orders(h["results"]), h["time"]
 
 
-def render_orders(items, feasible, on_run):
-    """Ventana «Órdenes de trabajo»: la revisión del flujo por reglas, las órdenes que proponen las reglas y
-    las IA (con sus motivos y votos verificados) y la cola de ejecución. La persona marca y ejecuta."""
+def _result_line(card, gate):
+    """El resultado actual en una línea (de la tarjeta JSON, no de la IA)."""
+    if not card:
+        return None
+    src = card.get("source") or {}
+    p = (card.get("structure_test") or {}).get("p_value")
+    beta = (((card.get("analytics") or {}).get("spectrum") or {}).get("fit") or {}).get("beta")
+    bits = [src.get("filename") or "—", src.get("filter") or "—", "%s %s" % ((gate or {}).get("icon") or "",
+                                                                          (gate or {}).get("title") or "")]
+    if p is not None:
+        bits.append("p = %.3f" % p)
+    if isinstance(beta, (int, float)) and beta == beta:
+        bits.append("β = %.2f" % beta)
+    return "📊 **Resultado actual:** " + " · ".join(bits) + " → [ver las pestañas](#analizar)"
+
+
+def render_orders(items, feasible, on_run, card=None, gate=None):
+    """Ventana «Órdenes de trabajo»: el resultado actual, la revisión del flujo por reglas, las órdenes que
+    proponen las reglas y las IA (con sus motivos y votos verificados) y la cola de ejecución. La persona
+    marca y ejecuta."""
     import flow
     ss = st.session_state
     ai, ai_time = _latest_orders()
@@ -454,26 +485,33 @@ def render_orders(items, feasible, on_run):
     queue, now = ss.get("order_queue") or [], ss.get("order_now")
     with st.container(key="win_orders"):
         theme.window_title("Órdenes de trabajo", "📋", "revisión del flujo: %s" % flow.summary(items))
+        line = _result_line(card, gate)
+        if line:
+            st.markdown(line)
         with st.expander("🧭 Revisión del flujo (reglas fijas de la app, no IA) · %s" % flow.summary(items),
                          expanded=not ai and any(it["estado"] != flow.OK for it in items)):
             for it in items:
                 st.markdown("%s **%s** — %s" % (flow.ICON[it["estado"]], it["paso"], it["detalle"]))
         if now or queue:
-            st.info("⏳ Ejecutando: **%s**%s" % (ACTION_LABELS.get(now, "—").lstrip("▶ "),
-                    (" · después: " + ", ".join(ACTION_LABELS[a].lstrip("▶ ") for a in queue)) if queue else ""))
+            st.info("⏳ Trabajando: **%s**%s. Buscar, descargar y analizar tarda 1–3 min; el resultado aparece aquí y en "
+                    "[4. Analizar y resultados](#analizar). Después, las IA revisan el resultado."
+                    % (ACTION_LABELS.get(now or (queue or ["—"])[0], "—").lstrip("▶ "),
+                       (" · después: " + ", ".join(ACTION_LABELS[a].lstrip("▶ ") for a in queue)) if queue and now else ""))
             if st.button("⏹ Parar después de esta orden", key="orders_stop"):
                 ss["order_queue"] = []
                 st.rerun()
         elif cands:
-            st.markdown("**Órdenes propuestas** (marca las que quieras; se ejecutan en orden: cargar → analizar → "
-                        "afinar → confirmar → control):")
+            st.markdown("👉 **Órdenes propuestas**: marca las que quieras y pulsa **▶ Ejecutar** (van en orden: cargar → "
+                        "analizar → afinar → confirmar → control).")
             picked = []
             for a in cands:
                 o = ai.get(a, {"votes": 0, "by": [], "reasons": []})
                 rule = next((it for it in items if it.get("orden") == a and it["estado"] != flow.OK), None)
                 label = ACTION_LABELS[a] + ("  · 🤖 %d IA" % o["votes"] if o["votes"] else "") + ("  · 🧠 regla" if rule else "")
                 default = o["votes"] > 0 or (not ai and rule is not None and a == rules[0])
-                if st.checkbox(label, value=default, key="order_pick_" + a):
+                # La clave cambia con cada propuesta de las IA: si no, la casilla guardaría lo marcado antes de
+                # que llegaran sus votos (caso real: un control con 2 votos salía sin marcar).
+                if st.checkbox(label, value=default, key="order_pick_%s_%s" % (a, ai_time or "reglas")):
                     picked.append(a)
                 why = (["🧠 %s: %s" % (rule["paso"], rule["detalle"])] if rule else []) + \
                       ["🤖 %s: %s%s" % (name, reason or "(sin motivo)", "" if good else " ⚠️ no pasó la comprobación: no vota")

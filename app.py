@@ -70,6 +70,8 @@ def _render_guide():
     import guide as G
     ss = st.session_state
     obj = ss.get("obj_free") if ss.get("obj_pick") == "Otro…" else ss.get("obj_pick")
+    if obj is None and "obj_pick" not in ss:          # primera carga: el selector aún no existe; su valor por defecto
+        obj = CURATED.get(ss.get("mission"), CURATED[next(iter(CURATED))])[0]
     field_ok = bool(ss.get("field_path")) and os.path.exists(ss.get("field_path") or "")
     R = ss.get("results")
     card, level, gate = None, None, None
@@ -118,11 +120,12 @@ def _render_guide():
                 with st.chat_message("assistant", avatar="📖"):
                     st.markdown(ans or "Esa pregunta no está en el glosario. Temas: %s." % G.GLOSSARY_TOPICS)
             st.caption("🧠 y 📖 siguen reglas fijas: no son una IA y no inventan. Gratis y sin conexión.")
-            AI.render_controls(q, card, msg, log, gate, flow_items=flow_items, feasible=feasible)
+            AI.render_controls(q, card, msg, log, gate, flow_items=flow_items, feasible=feasible,
+                               target="%s · %s" % (ss.get("mission", next(iter(CURATED))), obj) if obj else "")
         theme.taskbar(ss.get("ai_tray") or [], theme.tasks_for(field_ok))      # fija abajo, con el semáforo
-        # Órdenes de trabajo (revisión del flujo + propuestas) y respuestas de las IA, a lo ancho.
-        AI.render_orders(flow_items, feasible, _queue_orders)
+        # Respuestas de las IA y, debajo, las órdenes de trabajo (revisión del flujo + propuestas), a lo ancho.
         AI.render_council(msg, _guide_action, feasible=feasible)
+        AI.render_orders(flow_items, feasible, _queue_orders, card=card, gate=gate)
 
 
 def _guide_action(a, keep_notes=False):
@@ -167,8 +170,9 @@ def _run_orders(state):
     now = ss.pop("order_now", None)
     if now:
         done = ss.get("analysis_count", 0) > ss.pop("order_count0", 0)
+        notes = ss.get("guide_note") or []
         ss.setdefault("order_log", []).append("%s %s%s" % ("✔" if done else "✖", AI.ACTION_LABELS[now].lstrip("▶ "),
-                                                          "" if done else " (sin resultado nuevo: mira la nota de la guía)"))
+                                                          "" if done else ": sin resultado nuevo. %s" % (notes[-1] if notes else "")))
         if not ss.get("order_queue") and ss.get("auto_review_after", True):
             ss["flow_review_request"] = True
     queue = ss.get("order_queue") or []

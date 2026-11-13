@@ -99,17 +99,24 @@ class Kolmogorov1941:
         psf = None
         if self.nu_c:
             # Misma correccion que el espectro de la grafica: P / MTF^2 hasta X_MAX * nu_c.
-            from psf import MIN_RANGE, X_MAX, mtf
+            # Antes, el ruido del detector se resta (psf.signal_power): dividirlo por la MTF² aplana β.
+            from psf import MIN_RANGE, X_MAX, mtf, signal_power
             side = float(min(h, w))
-            keep = k_values / side <= X_MAX * self.nu_c
+            # El ruido se mide en anillos más allá del corte (los del ajuste no llegan tan lejos).
+            far = np.arange(int(np.ceil(1.1 * self.nu_c * side)), int(0.49 * side))
+            k_far, p_far = self._radial_average(power, radii=far)
+            sig, ok, noise = signal_power(np.concatenate([k_values, k_far]) / side,
+                                          np.concatenate([spectrum_radial, p_far]), self.nu_c)
+            sig, ok = sig[:len(k_values)], ok[:len(k_values)]
+            keep = (k_values / side <= X_MAX * self.nu_c) & ok
             raw = fit
             if keep.sum() >= 8 and k_values[keep].max() / max(k_values[keep].min(), 1e-9) >= MIN_RANGE:
                 m2 = np.maximum(mtf(k_values[keep] / side, self.nu_c) ** 2, 1e-6)
-                fit = fit_beta_with_error(k_values[keep], spectrum_radial[keep] / m2)
+                fit = fit_beta_with_error(k_values[keep], sig[keep] / m2)
             else:
                 fit = {"beta": float("nan"), "beta_se": float("nan"), "r_squared": 0.0,
                        "k_range": [float("nan"), float("nan")], "n_k_bins": int(keep.sum())}
-            psf = {"beta_raw": raw["beta"], "corrected": True}
+            psf = {"beta_raw": raw["beta"], "corrected": True, "noise_subtracted": noise is not None}
         kurt = k62_intermittency(img)
         iso = isotropic_score(img)
         clipped = False
@@ -137,9 +144,10 @@ class Kolmogorov1941:
             "isotropic_score": iso if np.isfinite(iso) else float("nan"),
             "beta_raw": psf["beta_raw"] if psf else beta,
             "psf_corrected": bool(psf),
+            "noise_subtracted": bool(psf and psf["noise_subtracted"]),
         }
 
-    def _radial_average(self, power_spectrum):
+    def _radial_average(self, power_spectrum, radii=None):
         h, w = power_spectrum.shape
         cy, cx = h // 2, w // 2
         y, x = np.ogrid[:h, :w]
@@ -148,7 +156,7 @@ class Kolmogorov1941:
         r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
         r_max = min(cy, cx)
         k_values, spectrum_values = [], []
-        for radius in range(1, min(r_max, self.num_shells * 5)):
+        for radius in (range(1, min(r_max, self.num_shells * 5)) if radii is None else radii):
             ring = (r >= radius - 0.5) & (r < radius + 0.5)
             if np.any(ring):
                 avg = float(np.mean(power_spectrum[ring]))

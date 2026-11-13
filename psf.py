@@ -69,6 +69,24 @@ def mtf(k_cycles_per_px, nu_c):
     return (2.0 / np.pi) * (np.arccos(x) - x * np.sqrt(1.0 - x * x))
 
 
+NOISE_MIN_BINS = 3          # anillos más allá del corte necesarios para medir el ruido
+
+
+def signal_power(k_cycles_per_px, p, nu_c):
+    """Potencia de la señal antes de dividir por la MTF²: P − N, donde N (ruido del detector, blanco) se mide
+    más allá del corte (1.1·ν_c < k < 0.49 ciclos/px), donde la difracción ya no deja pasar señal. Dividir
+    señal + ruido por la MTF² amplifica el ruido y aplana β (simulado con MIRI F1130W y β = 2.8: 2.50 con el
+    ruido dentro, 2.76 restándolo). Devuelve (P − N, máscara S/R > 1, N); si no hay banda para medir el ruido
+    (filtros cortos: ν_c ≥ 0.45), N = None y no se resta nada."""
+    k, p = np.asarray(k_cycles_per_px, dtype=float), np.asarray(p, dtype=float)
+    band = (k > 1.1 * nu_c) & (k < 0.49) & np.isfinite(p)
+    if band.sum() < NOISE_MIN_BINS:
+        return p, np.ones(p.shape, bool), None
+    noise = float(np.median(p[band]))
+    sig = p - noise
+    return sig, sig > noise, noise
+
+
 def describe(meta):
     """Lo que se sabe de la difracción para una región: para el JSON y la corrección."""
     lam = wavelength_um(meta.get("telescope"), meta.get("instrument"), meta.get("filter"))

@@ -1096,3 +1096,26 @@ decir «hay que cargar un archivo». Las órdenes quedaban arriba esperando un c
      - «Sí» → busca, carga y analiza → resultado a la vista → revisión con IA → marcar «más subrogados» →
        ejecutar → n = 199 y segundo análisis → nueva revisión;
      - lo que las IA no votaron sale sin marcar.
+
+## β: se resta el ruido del detector antes de corregir la difracción
+
+Caso real (JSON de NGC 7023 NW, MIRI F1130W, 11 oct 2026):
+- β corregido salía **0,88** (R² 0,80), frente a **1,33** sin corregir (R² 0,94). El plugin de Kolmogorov daba
+  1,53: dos medidas de lo mismo que no coincidían.
+- En el extremo del ajuste, el ruido del detector era ~la mitad de la potencia. Dividir señal + ruido por la
+  MTF² amplifica el ruido y aplana β.
+- Simulado (β real 2,8, MTF de F1130W, ruido alto): la corrección anterior daba 2,50 en la gráfica del espectro
+  y 2,34 en el plugin.
+
+185. **`psf.signal_power`**: el ruido se mide más allá del corte de la difracción (1,1·ν_c < k < 0,49
+     ciclos/px), donde ya no pasa señal. Después se resta, y solo se ajustan las escalas con señal mayor que el
+     ruido.
+     - Resultado ahora: 2,73 en la gráfica del espectro y 2,69 en el plugin.
+     - El plugin mide el ruido en anillos más allá de los del ajuste, que no llegaban tan lejos.
+     - Con filtros cortos (ν_c ≥ 0,45, p. ej. NIRCam F200W) no hay banda donde medirlo y no se resta nada.
+     - El JSON lo indica con `noise_subtracted`.
+186. `DESCRIPTORS_VERSION = 5`: cambian los β corregidos, así que Novedad no mezcla análisis de la versión 4.
+187. Hipótesis magnética: con 0,01 < p ≤ 0,05 dice «indicio débil de dirección, no concluyente». Antes decía
+     «sin dirección preferente» aunque la coherencia superara el 95 % del nulo (p = 0,03 en este caso).
+188. Test: β = 2,8 con ruido alto se recupera en la gráfica del espectro y en el plugin; sin banda de ruido no
+     se resta nada.

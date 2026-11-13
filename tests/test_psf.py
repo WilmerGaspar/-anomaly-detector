@@ -106,8 +106,26 @@ def test_full_analysis_records_psf_and_sky_geometry():
                           meta_full=meta, source={"archive": "MAST"}, hole_frac=0.0, max_empty_fraction=0.001)
     card = json.loads(out["json"])
     assert abs(card["analysis"]["psf"]["nu_c_cycles_per_px"] - 0.165) < 0.002
-    assert card["analysis"]["pixel_scale_arcsec"] == 0.11 and card["analysis"]["descriptors_version"] == 4
+    assert card["analysis"]["pixel_scale_arcsec"] == 0.11 and card["analysis"]["descriptors_version"] == 5
     assert card["descriptors"]["kolmogorov_1941"]["psf_corrected"] is True
     assert card["analytics"]["spectrum"]["fit"]["psf_corrected"] is True
     assert abs(card["source"]["center_dec_deg"] - 68.16) < 0.1
     assert 0 <= card["descriptors"]["anisotropy"]["structure_pa_deg"] < 180
+
+
+def test_detector_noise_is_removed_before_the_mtf_correction():
+    """Caso real (NGC 7023, MIRI F1130W): β corregido 0.88 (R² 0.80) frente a 1.33 sin corregir; el ruido
+    del detector pesaba ~50 % de la potencia en el extremo del ajuste y dividirlo por la MTF² aplanaba β.
+    Simulado con β = 2.8: 2.50 antes; ahora el ruido se mide más allá del corte y se resta."""
+    from analytics import full_analytics
+    from plugins.kolmogorov_1941 import Kolmogorov1941
+    nu_c = P.cutoff_cycles_per_px("JWST", "MIRI", "F1130W", 0.1109)
+    imgs = [_diffraction_field(2.8, nu_c, s, noise=0.6) for s in range(3)]
+    fits_ = [full_analytics(i, seed=1, nu_c=nu_c)["spectrum"]["fit"] for i in imgs]
+    assert abs(np.mean([f["beta"] for f in fits_]) - 2.8) < 0.15 and all(f["noise_subtracted"] for f in fits_)
+    ks = [Kolmogorov1941(nu_c=nu_c).analyze(i) for i in imgs]
+    assert abs(np.mean([r["beta"] for r in ks]) - 2.8) < 0.2 and all(r["noise_subtracted"] for r in ks)
+    # Sin banda más allá del corte (NIRCam F200W: ν_c > 0.5) no se resta nada.
+    k = np.linspace(0.01, 0.5, 50)
+    sig, ok, noise = P.signal_power(k, k ** -2.0, 0.6)
+    assert noise is None and ok.all() and np.allclose(sig, k ** -2.0)
